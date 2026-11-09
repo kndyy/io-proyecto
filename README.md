@@ -54,8 +54,9 @@ Para cambiar de solución no hace falta recompilar.
 | `vnd-s1` | solo inicio `s1` | RELOCATE + SWAP |
 | `vnd-s2` | solo inicio `s2` | RELOCATE + SWAP |
 | `integrated` | greedy + ILS con VND `RELOCATE`, `SWAP` y `DISPATCH` | despacho AGV adaptativo |
+| `alns-joint` | ALNS con destrucción/reparación, prioridades por lote y rutas AGV mixtas | experimental |
 
-`integrated` es la estrategia por defecto. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote. Las estrategias anteriores se conservan para comparación.
+`integrated` es la estrategia por defecto. `alns-joint` está implementada y validada, pero no se selecciona porque solo mejora a `integrated` en la instancia 01. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote. Las estrategias anteriores se conservan para comparación.
 
 Cada estrategia tipo `vnd` prueba `batch_limit=1` y `batch_limit=C`, elige el mejor inicio factible y conserva el mejor resultado global. La búsqueda usa first improvement, 40 vecinos por muestra y hasta 1000 simulaciones por inicio. `integrated` usa `seed=20261109`, `max_evals=50000` y `max_neighbors=120` por defecto.
 
@@ -130,6 +131,18 @@ Grupo `FED`. Los diez `proposed_submissions/` fueron subidos con Playwright y ac
 
 Estos valores son la mejor solución aceptada por instancia en la plataforma, no una prueba de optimalidad global. El histórico de intentos y el detalle del algoritmo integrado están en `ALGORITMO_INTEGRADO.md`, `results/integrated_comparison.csv` y `results/platform_validation.csv`.
 
+## Experimento ALNS con rutas mixtas
+
+`alns-joint` implementa la especificación de ALNS con rutas `I`, `O` y `M`, prioridades por lote y tres reinicios. Es correcto y todos sus TXT pasan el validador, pero no supera a `integrated` salvo en la instancia 01:
+
+| Instancia | integrated | alns-joint 10k | alns-joint 50k |
+|---|---:|---:|---:|
+| 01 | 355.80 | 352.25 | 351.00 |
+| 06 | 998.94 | 1165.86 | 1132.85 |
+| 10 | 1488.67 | 1869.51 | 1836.46 |
+
+La comparación completa está en `results/alns_joint_comparison.csv` y el análisis en `ALGORITMO_ALNS_RUTAS_MIXTAS.md`. El diagnóstico es que el decoder de rutas mixtas aumenta el bloqueo de `β`; más evaluaciones no cierran la brecha. La ablación del mismo ALNS con el decoder histórico sí mejora ligeramente, así que el siguiente trabajo debe centrarse en la política de AGVs, no en más iteraciones.
+
 ## Diagnóstico de factibilidad
 
 El checker rechazó el primer envío con:
@@ -197,4 +210,5 @@ proposed_submissions/ soluciones integradas validadas en IO1Lab
 warmstart/        soluciones previas usadas solo como punto de partida
 diagnostics/      errores antes/después y resumen del diagnóstico
 ALGORITMO_INTEGRADO.md  descripción del método ILS + VND + AGV
+ALGORITMO_ALNS_RUTAS_MIXTAS.md  método ALNS experimental y diagnóstico
 ```

@@ -327,7 +327,7 @@ int main(int argc, char** argv) {
         }
         if (config.listStrategies) {
             for (const char* name : {"b1", "b2", "b3", "s0", "s1", "s2",
-                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated"}) {
+                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint"}) {
                 std::cout << name << '\n';
             }
             return 0;
