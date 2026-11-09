@@ -13,7 +13,7 @@
 
 namespace io1 {
 
-enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint };
+enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket };
 
 struct Options {
     std::uint64_t seed = 20261106;
@@ -44,6 +44,7 @@ inline bool strategyFromName(const std::string& name, Strategy& strategy) {
     else if (name == "vnd-s2") strategy = Strategy::VndS2;
     else if (name == "integrated") strategy = Strategy::Integrated;
     else if (name == "alns-joint") strategy = Strategy::AlnsJoint;
+    else if (name == "phase-bucket") strategy = Strategy::PhaseBucket;
     else return false;
     return true;
 }
@@ -62,6 +63,7 @@ inline std::string strategyName(Strategy strategy) {
         case Strategy::VndS2: return "vnd-s2";
         case Strategy::Integrated: return "integrated";
         case Strategy::AlnsJoint: return "alns-joint";
+        case Strategy::PhaseBucket: return "phase-bucket";
     }
     return "vnd";
 }
@@ -936,11 +938,114 @@ inline Outcome solveAlnsJoint(const Instance& in, const Options& options) {
     return outcome;
 }
 
+
+inline bool phaseTest(const Instance& in, SearchState& state,
+                      const Candidate& next, int batch) {
+    if (state.budget <= 0) return false;
+    Result result = simulate(in, next, batch, false);
+    --state.budget;
+    ++state.evals;
+    if (!result.feasible) return false;
+    if (state.result.feasible && result.mean >= state.result.mean - 1e-9L)
+        return false;
+    state.candidate = next;
+    state.result = std::move(result);
+    state.batchLimit = batch;
+    return true;
+}
+
+inline bool phaseImprove(const Instance& in, SearchState& state,
+                         const Options& options, std::mt19937_64& rng) {
+    int neighborhood = 0;
+    bool changed = false;
+    while (state.budget > 0 && neighborhood < 3) {
+        bool improved = false;
+        if (neighborhood == 0)
+            improved = tryRelocate(in, state, rng, options.maxNeighbors, false);
+        else if (neighborhood == 1)
+            improved = trySwap(in, state, rng, options.maxNeighbors, false);
+        else {
+            for (int batch = 1; batch <= in.C && !improved; ++batch) {
+                for (int bias = -5; bias <= 5 && !improved; ++bias) {
+                    Candidate variant = state.candidate;
+                    variant.phaseAware = true;
+                    variant.phaseBias = bias;
+                    if (variant.phaseBias == state.candidate.phaseBias &&
+                        batch == state.batchLimit) continue;
+                    improved = phaseTest(in, state, variant, batch);
+                }
+            }
+        }
+        changed = changed || improved;
+        neighborhood = improved ? 0 : neighborhood + 1;
+    }
+    return changed;
+}
+
+inline Outcome solvePhaseBucket(const Instance& in, const Options& options) {
+    int budget = std::max(1, options.maxEvals);
+    int initial = std::max(1, budget / 3);
+    Outcome integrated = solveIntegrated(in,
+        Options{options.seed, initial, options.maxNeighbors});
+    SearchState best;
+    best.candidate = integrated.candidate;
+    best.result = integrated.result;
+    best.batchLimit = integrated.batchLimit;
+    best.evals = integrated.evals;
+    best.budget = budget - std::min(budget, initial);
+    SearchState current = best;
+    for (int batch = 1; batch <= in.C; ++batch) {
+        for (int bias = -5; bias <= 5; ++bias) {
+            Candidate variant = integrated.candidate;
+            variant.phaseAware = true;
+            variant.mixedRoutes = false;
+            variant.phaseBias = bias;
+            phaseTest(in, current, variant, batch);
+        }
+    }
+    if (betterIntegrated(current, best)) best = current;
+    std::mt19937_64 rng(options.seed ^ 0xA0761D6478BD642FULL);
+    int attempts = 0;
+    while (current.budget > 0) {
+        SearchState trial = current;
+        if (attempts++ % 4 == 0) {
+            int count = 0;
+            trial.candidate = destroyRepair(in, trial.candidate, trial.result,
+                                            static_cast<int>(rng() % 3), rng, count);
+        } else {
+            perturbIntegrated(in, trial, rng);
+        }
+        trial.candidate.phaseAware = true;
+        trial.candidate.mixedRoutes = false;
+        trial.candidate.phaseBias = std::clamp(
+            trial.candidate.phaseBias + static_cast<int>(rng() % 3) - 1, -5, 5);
+        trial.result = simulate(in, trial.candidate, trial.batchLimit, false);
+        --trial.budget;
+        ++trial.evals;
+        if (trial.result.feasible)
+            phaseImprove(in, trial, options, rng);
+        if (betterIntegrated(trial, best)) best = trial;
+        bool accept = betterIntegrated(trial, current) || attempts % 5 == 0;
+        long long remaining = trial.budget, evaluated = trial.evals;
+        current = accept && trial.result.feasible ? trial : best;
+        current.budget = remaining;
+        current.evals = evaluated;
+    }
+    Outcome outcome;
+    outcome.candidate = best.candidate;
+    outcome.batchLimit = best.batchLimit;
+    outcome.result = simulate(in, best.candidate, best.batchLimit, true);
+    outcome.evals = current.evals;
+    outcome.strategy = "phase-bucket";
+    return outcome;
+}
+
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {
     Outcome outcome;
     outcome.strategy = strategyName(strategy);
     if (strategy == Strategy::Integrated) return solveIntegrated(in, options);
     if (strategy == Strategy::AlnsJoint) return solveAlnsJoint(in, options);
+    if (strategy == Strategy::PhaseBucket) return solvePhaseBucket(in, options);
 
     if (strategy == Strategy::B1 || strategy == Strategy::B2 || strategy == Strategy::B3) {
         std::vector<int> order = strategy == Strategy::B2 ? orderByFastest(in) : orderById(in);
