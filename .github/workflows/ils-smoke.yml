@@ -1,0 +1,58 @@
+name: IO1 C++20 smoke and proposed submissions
+on:
+  push:
+    branches:
+      - feature/ils-agv-integrated
+    paths:
+      - '**/*.cpp'
+      - '**/*.hpp'
+      - .github/workflows/ils-smoke.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
+      - name: Verify existing model
+        run: ./io1 --self-test
+      - name: Generate and validate best of two search budgets
+        run: |
+          mkdir -p proposed_submissions results
+          printf 'instance,mean_10000_80,mean_50000_120,selected,baseline\n' > results/integrated_comparison.csv
+          for n in 01 02 03 04 05 06 07 08 09 10; do
+            instance="instancia_${n}"
+            a=$(./io1 --input "instances/${instance}.io1" --strategy integrated --seed 20261109 --max-evals 10000 --max-neighbors 80 --txt "/tmp/a_${n}.txt")
+            b=$(./io1 --input "instances/${instance}.io1" --strategy integrated --seed 20261109 --max-evals 50000 --max-neighbors 120 --txt "/tmp/b_${n}.txt")
+            echo "$a"
+            echo "$b"
+            python3 tools/validate_txt.py "instances/${instance}.io1" "/tmp/a_${n}.txt"
+            python3 tools/validate_txt.py "instances/${instance}.io1" "/tmp/b_${n}.txt"
+            va=$(printf '%s\n' "$a" | sed -n 's/.* mean=\([0-9.]*\) evals=.*/\1/p')
+            vb=$(printf '%s\n' "$b" | sed -n 's/.* mean=\([0-9.]*\) evals=.*/\1/p')
+            baseline=$(awk -F, -v id="$instance" 'NR>1 && $1 == id {print $2}' submissions/manifest.csv)
+            if awk -v x="$va" -v y="$vb" 'BEGIN {exit !(x+0 < y+0)}'; then
+              selected="$va"
+              cp "/tmp/a_${n}.txt" "proposed_submissions/${instance}.txt"
+            else
+              selected="$vb"
+              cp "/tmp/b_${n}.txt" "proposed_submissions/${instance}.txt"
+            fi
+            printf '%s,%s,%s,%s,%s\n' "$instance" "$va" "$vb" "$selected" "$baseline" >> results/integrated_comparison.csv
+            if ! awk -v x="$selected" -v y="$baseline" 'BEGIN {exit !(x+0 < y+0)}'; then
+              echo "New solver is not better on ${instance}" >&2
+              exit 1
+            fi
+          done
+      - name: Persist proposed TXT and comparison
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/integrated_comparison.csv proposed_submissions/
+          git diff --staged --quiet || git commit -m "Store validated improved TXT proposals for all ten instances"
+          git fetch origin feature/ils-agv-integrated
+          git rebase origin/feature/ils-agv-integrated
+          git push origin HEAD:feature/ils-agv-integrated

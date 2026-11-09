@@ -13,7 +13,7 @@
 
 namespace io1 {
 
-enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2 };
+enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated };
 
 struct Options {
     std::uint64_t seed = 20261106;
@@ -42,6 +42,7 @@ inline bool strategyFromName(const std::string& name, Strategy& strategy) {
     else if (name == "vnd-s0") strategy = Strategy::VndS0;
     else if (name == "vnd-s1") strategy = Strategy::VndS1;
     else if (name == "vnd-s2") strategy = Strategy::VndS2;
+    else if (name == "integrated") strategy = Strategy::Integrated;
     else return false;
     return true;
 }
@@ -58,6 +59,7 @@ inline std::string strategyName(Strategy strategy) {
         case Strategy::VndS0: return "vnd-s0";
         case Strategy::VndS1: return "vnd-s1";
         case Strategy::VndS2: return "vnd-s2";
+        case Strategy::Integrated: return "integrated";
     }
     return "vnd";
 }
@@ -360,9 +362,137 @@ inline LimitsResult evaluateLimits(const Instance& in, const Candidate& candidat
     return limits;
 }
 
+
+struct DispatchMove {
+    bool adaptive;
+    int bias;
+    int batch;
+};
+
+inline bool considerIntegrated(const Instance& in, SearchState& state,
+                               Candidate next, int batch) {
+    if (state.budget <= 0) return false;
+    Result tested = simulate(in, next, batch);
+    --state.budget;
+    ++state.evals;
+    long double eps = 1e-9L * std::max(1.0L, std::fabs(state.result.mean));
+    if (!tested.feasible || tested.mean >= state.result.mean - eps) return false;
+    state.candidate = std::move(next);
+    state.result = std::move(tested);
+    state.batchLimit = batch;
+    return true;
+}
+
+inline bool tryDispatch(const Instance& in, SearchState& state,
+                        std::mt19937_64& rng) {
+    std::vector<DispatchMove> moves;
+    for (int batch = 1; batch <= in.C; ++batch) {
+        moves.push_back({false, 0, batch});
+        for (int bias = -4; bias <= 4; ++bias)
+            moves.push_back({true, bias, batch});
+    }
+    shuffleVector(moves, rng);
+    for (const auto& move : moves) {
+        if (state.budget <= 0) break;
+        if (move.adaptive == state.candidate.adaptive &&
+            (!move.adaptive || move.bias == state.candidate.bias) &&
+            move.batch == state.batchLimit) continue;
+        Candidate next = state.candidate;
+        next.adaptive = move.adaptive;
+        next.bias = move.bias;
+        if (considerIntegrated(in, state, std::move(next), move.batch)) return true;
+    }
+    return false;
+}
+
+inline void improveIntegrated(const Instance& in, SearchState& state,
+                              const Options& options, std::mt19937_64& rng) {
+    int neighborhood = 1;
+    while (state.budget > 0 && neighborhood <= 3) {
+        bool improved = neighborhood == 1
+            ? tryRelocate(in, state, rng, options.maxNeighbors)
+            : neighborhood == 2
+                ? trySwap(in, state, rng, options.maxNeighbors)
+                : tryDispatch(in, state, rng);
+        neighborhood = improved ? 1 : neighborhood + 1;
+    }
+}
+
+inline void perturbIntegrated(const Instance& in, SearchState& state,
+                              std::mt19937_64& rng) {
+    int changes = std::max(2, std::min(6, (in.n + 39) / 40));
+    for (int i = 0; i < changes; ++i) {
+        bool relocate = (rng() % 10) < 6;
+        if (relocate) {
+            auto moves = relocateMoves(in, state.candidate);
+            if (!moves.empty()) state.candidate =
+                applyMove(state.candidate, moves[rng() % moves.size()]);
+        } else {
+            auto moves = swapMoves(in, state.candidate);
+            if (!moves.empty()) state.candidate =
+                applySwap(state.candidate, moves[rng() % moves.size()]);
+        }
+    }
+    state.candidate.adaptive = true;
+    if ((rng() % 2) == 0)
+        state.candidate.bias = std::clamp(state.candidate.bias +
+                                   ((rng() % 2) ? 1 : -1), -4, 4);
+    if ((rng() % 4) == 0)
+        state.batchLimit = 1 + static_cast<int>(rng() % in.C);
+}
+
+inline bool betterIntegrated(const SearchState& a, const SearchState& b) {
+    return a.result.feasible &&
+           (!b.result.feasible || a.result.mean < b.result.mean - 1e-9L);
+}
+
+inline Outcome solveIntegrated(const Instance& in, const Options& options) {
+    std::mt19937_64 rng(options.seed);
+    SearchState current;
+    current.candidate = buildOrdered(in, orderByHeight(in), Assign::Score);
+    current.batchLimit = in.C;
+    current.result = simulate(in, current.candidate, current.batchLimit);
+    current.evals = 1;
+    current.budget = std::max(1, options.maxEvals) - 1;
+    for (int batch : {in.C, 1}) {
+        Candidate variant = current.candidate;
+        variant.adaptive = true;
+        considerIntegrated(in, current, std::move(variant), batch);
+    }
+    improveIntegrated(in, current, options, rng);
+    SearchState best = current;
+    int stagnation = 0;
+    while (current.budget > 0) {
+        SearchState trial = current;
+        perturbIntegrated(in, trial, rng);
+        trial.result = simulate(in, trial.candidate, trial.batchLimit);
+        --trial.budget;
+        ++trial.evals;
+        if (trial.result.feasible) improveIntegrated(in, trial, options, rng);
+        bool changedBest = betterIntegrated(trial, best);
+        stagnation = changedBest ? 0 : stagnation + 1;
+        if (changedBest) best = trial;
+        bool accept = changedBest || betterIntegrated(trial, current)
+                      || stagnation % 4 == 0;
+        long long remaining = trial.budget;
+        long long count = trial.evals;
+        current = accept && trial.result.feasible ? trial : best;
+        current.budget = remaining;
+        current.evals = count;
+    }
+    Outcome outcome;
+    outcome.candidate = best.candidate;
+    outcome.result = best.result;
+    outcome.batchLimit = best.batchLimit;
+    outcome.evals = current.evals;
+    outcome.strategy = "integrated";
+    return outcome;
+}
+
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {
     Outcome outcome;
     outcome.strategy = strategyName(strategy);
+    if (strategy == Strategy::Integrated) return solveIntegrated(in, options);
 
     if (strategy == Strategy::B1 || strategy == Strategy::B2 || strategy == Strategy::B3) {
         std::vector<int> order = strategy == Strategy::B2 ? orderByFastest(in) : orderById(in);
