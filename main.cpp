@@ -384,7 +384,14 @@ int main(int argc, char** argv) {
                   << " mean=" << std::fixed << std::setprecision(6)
                   << (outcome.result.feasible ? outcome.result.mean : -1)
                   << " evals=" << outcome.evals
-                  << " cpu_ms=" << milliseconds << '\n';
+                  << " cpu_ms=" << milliseconds
+                  << " blocked_time=" << outcome.result.blockedTime
+                  << " idle_time=" << outcome.result.machineIdleTime
+                  << " empty_travel=" << outcome.result.emptyTravel
+                  << " loaded_travel=" << outcome.result.loadedTravel
+                  << " phase_input_trips=" << outcome.result.phaseInputTrips
+                  << " phase_output_trips=" << outcome.result.phaseOutputTrips
+                  << '\n';
         return outcome.result.feasible ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
