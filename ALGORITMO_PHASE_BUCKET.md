@@ -73,7 +73,22 @@ El monitor valida los diez TXT con `tools/validate_txt.py`, compara frente a la 
 
 ## Alcance de las conclusiones
 
-Se ha observado mejora local en nueve de diez instancias respecto a los mejores envíos aceptados con 2 500 evaluaciones. No hay garantía de optimalidad ni demostración de que el enfoque sea superior para todas las semillas o presupuestos. La validación de IO1Lab sigue siendo necesaria antes de publicar nuevos resultados.
+En la prueba reproducible de 50 000 evaluaciones con semilla 20261109 se superaron los diez mejores valores aceptados previamente. La comparación siguió usando los diez verificadores de factibilidad. Esta tabla es evidencia de una ejecución, no una garantía de optimalidad ni de superioridad para cualquier semilla.
+
+| Instancia | Referencia aceptada | Phase-bucket 50k |
+|---|---:|---:|
+| 01 | 351.0000 | 350.3455 |
+| 02 | 450.3642 | 441.5838 |
+| 03 | 566.7783 | 527.7851 |
+| 04 | 591.5508 | 573.9218 |
+| 05 | 716.0324 | 654.5154 |
+| 06 | 998.9354 | 915.8698 |
+| 07 | 1207.7515 | 1113.1552 |
+| 08 | 1426.5020 | 1295.6499 |
+| 09 | 1477.9573 | 1319.5259 |
+| 10 | 1488.6675 | 1312.0424 |
+
+Resultado registrado en [GitHub Actions — monitor 50k](https://github.com/kndyy/io-proyecto/actions/runs/42674605687). No se realizó envío automático a IO1Lab; este continúa pendiente para confirmar los nuevos valores.
 
 ## Auditoría de alns-joint
 
