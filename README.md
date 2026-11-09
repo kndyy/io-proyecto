@@ -70,6 +70,33 @@ python3 tools/io1_helper.py run --instance instances/instancia_10.io1 --strategy
 
 `bench` escribe `results/results.csv`, imprime el ranking y genera `results/recommended_selector.conf` con la estrategia de menor razón media frente al mejor resultado de cada instancia.
 
+## Envíos TXT para IO1Lab
+
+El binario exporta el formato oficial con `--txt`:
+
+```bash
+./io1 --input instances/instancia_01.io1 --strategy vnd --txt submissions/instancia_01.txt
+```
+
+Los envíos generados están en `submissions/`:
+
+| Archivo | Media | Configuración |
+|---|---:|---|
+| `submissions/instancia_01.txt` | 359.050000 | 1000 eval, 200 vecinos, seed 20261106 |
+| `submissions/instancia_02.txt` | 464.691964 | 30000 eval, 1000 vecinos, seed 9001 |
+| `submissions/instancia_03.txt` | 577.834940 | 10000 eval, 500 vecinos, seed 9001 |
+| `submissions/instancia_04.txt` | 602.349363 | 10000 eval, 500 vecinos, seed 3 |
+| `submissions/instancia_05.txt` | 715.949648 | 30000 eval, 1000 vecinos, seed 9001 |
+| `submissions/instancia_06.txt` | 1039.823463 | 10000 eval, 500 vecinos, seed 9001 |
+| `submissions/instancia_07.txt` | 1258.691111 | 30000 eval, 1000 vecinos, seed 55555 |
+| `submissions/instancia_08.txt` | 1487.776149 | 30000 eval, 1000 vecinos, seed 9001 |
+| `submissions/instancia_09.txt` | 1562.029433 | 30000 eval, 1000 vecinos, seed 9001 |
+| `submissions/instancia_10.txt` | 1549.265496 | 30000 eval, 1000 vecinos, seed 3 |
+
+`submissions/ejemplo_minimo.txt` reproduce el ejemplo canónico de un lote de la documentación. El ejemplo verificado de 1062 s no estaba incluido completo en los materiales recibidos.
+
+Cada envío se valida con `tools/validate_txt.py`, que comprueba cabecera, columnas, recursos canónicos, capacidades, posiciones, movimientos, buffers y precedencias, y recalcula la media desde las entregas en `f`. `tools/make_submissions.py` regenera los diez archivos y `submissions/manifest.csv`.
+
 ## Resultados actuales
 
 Diez instancias oficiales, semilla `20261106`, presupuesto académico fijo.
@@ -97,7 +124,7 @@ Diez instancias oficiales, semilla `20261106`, presupuesto académico fijo.
 | s2 | 10/10 | 1.08261 | 3.00 | 20 |
 | vnd | 10/10 | 1.00000 | 96.81 | 10689 |
 
-El detalle por ejecución está en `results/results.csv`. El formato oficial de IO1Lab sigue pendiente; `--out` genera un CSV interno y `--format io1lab` responde `IO1LAB_FORMAT_PENDING`.
+El detalle por ejecución está en `results/results.csv`. `--out` genera un CSV interno; `--txt` genera el archivo oficial y `python3 tools/validate_txt.py <instancia.io1> <envio.txt>` lo valida antes de subirlo.
 
 ## Estructura
 
@@ -107,8 +134,9 @@ instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
 selector.conf     selector externo en tiempo de ejecución
-tools/            helper de comparación, fuera del binario
+tools/            comparación, generación y validación de envíos
 instances/        diez instancias oficiales
 materials/        paquete original recibido
 results/          resultados y selector recomendado
+submissions/      envíos TXT por instancia y ejemplo mínimo
 ```

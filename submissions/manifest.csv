@@ -1,0 +1,11 @@
+instance,mean,validated_mean,max_evals,max_neighbors,seed,txt
+instancia_01,359.050000000,359.050000000,1000,200,20261106,submissions/instancia_01.txt
+instancia_02,464.691964000,464.691964286,30000,1000,9001,submissions/instancia_02.txt
+instancia_03,577.834940000,577.834940312,10000,500,9001,submissions/instancia_03.txt
+instancia_04,602.349363000,602.349362674,10000,500,3,submissions/instancia_04.txt
+instancia_05,715.949648000,715.949648268,30000,1000,9001,submissions/instancia_05.txt
+instancia_06,1039.823463000,1039.823463203,10000,500,9001,submissions/instancia_06.txt
+instancia_07,1258.691111000,1258.691111111,30000,1000,55555,submissions/instancia_07.txt
+instancia_08,1487.776149000,1487.776148583,30000,1000,9001,submissions/instancia_08.txt
+instancia_09,1562.029433000,1562.029433329,30000,1000,9001,submissions/instancia_09.txt
+instancia_10,1549.265496000,1549.265495868,30000,1000,3,submissions/instancia_10.txt

@@ -14,6 +14,7 @@ using namespace io1;
 struct Config {
     std::string input;
     std::string output;
+    std::string txt;
     std::string selector;
     std::string strategy = "vnd";
     std::uint64_t seed = 20261106;
@@ -21,7 +22,6 @@ struct Config {
     int maxNeighbors = 40;
     bool selfTest = false;
     bool listStrategies = false;
-    bool official = false;
     bool help = false;
 };
 
@@ -81,14 +81,12 @@ Config parseArguments(int argc, char** argv) {
         };
         if (arg == "--input") config.input = value();
         else if (arg == "--out") config.output = value();
+        else if (arg == "--txt") config.txt = value();
         else if (arg == "--selector") config.selector = value();
         else if (arg == "--strategy") { strategy = value(); hasStrategy = true; }
         else if (arg == "--seed") { seed = std::stoull(value()); hasSeed = true; }
         else if (arg == "--max-evals") { maxEvals = std::stoi(value()); hasMaxEvals = true; }
         else if (arg == "--max-neighbors") { maxNeighbors = std::stoi(value()); hasMaxNeighbors = true; }
-        else if (arg == "--format") {
-            if (value() == "io1lab") config.official = true;
-        }
         else if (arg == "--self-test") config.selfTest = true;
         else if (arg == "--list-strategies") config.listStrategies = true;
         else if (arg == "--help" || arg == "-h") config.help = true;
@@ -216,10 +214,66 @@ void writeCsv(const Instance& in, const Outcome& outcome, const std::string& pat
     }
 }
 
+std::string txtLocation(const Instance& in, int index) {
+    if (index == in.o) return "o";
+    if (index == in.f) return "f";
+    for (int j = 0; j < in.m; ++j) {
+        if (index == in.alpha[j]) return "a" + std::to_string(j + 1);
+    }
+    for (int j = 0; j < in.m; ++j) {
+        if (index == in.beta[j]) return "b" + std::to_string(j + 1);
+    }
+    return in.locationNames[index];
+}
+
+void writeTxt(const Instance& in, const Outcome& outcome, const std::string& path) {
+    const auto& log = outcome.result.log;
+    std::vector<int> orders(log.size(), 0);
+    std::vector<int> machineOrders(in.m, 0);
+    std::vector<int> agvOrders(in.K, 0);
+    for (std::size_t i = 0; i < log.size(); ++i) {
+        if (log[i].type == LogType::Process) {
+            orders[i] = ++machineOrders[log[i].resource];
+        } else {
+            orders[i] = ++agvOrders[log[i].resource];
+        }
+    }
+
+    std::ofstream file(path);
+    file << "recurso;orden;accion;lote;ubicacion;destino;inicio\n";
+    file << std::fixed << std::setprecision(9);
+    for (int j = 0; j < in.m; ++j) {
+        for (std::size_t i = 0; i < log.size(); ++i) {
+            const LogEvent& event = log[i];
+            if (event.type != LogType::Process || event.resource != j) continue;
+            file << "M" << j + 1 << ';' << orders[i] << ";PROCESS;"
+                 << in.lots[event.lot].id << ";;;" << event.start << '\n';
+        }
+    }
+    for (int k = 0; k < in.K; ++k) {
+        for (std::size_t i = 0; i < log.size(); ++i) {
+            const LogEvent& event = log[i];
+            if (event.type == LogType::Process || event.resource != k) continue;
+            file << "AGV" << k + 1 << ';' << orders[i] << ';';
+            if (event.type == LogType::Move) {
+                file << "MOVE;;" << txtLocation(in, event.from) << ';'
+                     << txtLocation(in, event.to) << ';' << event.start << '\n';
+            } else if (event.type == LogType::Pickup) {
+                file << "PICKUP;" << in.lots[event.lot].id << ';'
+                     << txtLocation(in, event.from) << ";;" << event.start << '\n';
+            } else {
+                file << "DELIVER;" << in.lots[event.lot].id << ';'
+                     << txtLocation(in, event.from) << ";;" << event.start << '\n';
+            }
+        }
+    }
+}
+
 void printUsage() {
-    std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--selector <archivo>]\n"
-              << "       [--strategy <nombre>] [--seed <entero>] [--max-evals <entero>]\n"
-              << "       [--max-neighbors <entero>] [--self-test] [--list-strategies]\n";
+    std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--txt <envio.txt>]\n"
+              << "       [--selector <archivo>] [--strategy <nombre>] [--seed <entero>]\n"
+              << "       [--max-evals <entero>] [--max-neighbors <entero>]\n"
+              << "       [--self-test] [--list-strategies]\n";
 }
 
 int main(int argc, char** argv) {
@@ -244,10 +298,6 @@ int main(int argc, char** argv) {
             std::cout << "SELF_TEST_OK\n";
             return 0;
         }
-        if (config.official) {
-            std::cout << "IO1LAB_FORMAT_PENDING\n";
-            return 2;
-        }
         if (config.input.empty()) {
             printUsage();
             return 1;
@@ -268,6 +318,9 @@ int main(int argc, char** argv) {
 
         if (outcome.result.feasible && !config.output.empty()) {
             writeCsv(in, outcome, config.output);
+        }
+        if (outcome.result.feasible && !config.txt.empty()) {
+            writeTxt(in, outcome, config.txt);
         }
 
         std::cout << "RESULT instance=" << stem(config.input)

@@ -26,6 +26,7 @@ struct Instance {
     std::vector<std::vector<long double>> tau;
     std::vector<int> alpha;
     std::vector<int> beta;
+    std::vector<std::string> locationNames;
     int o = -1;
     int f = -1;
     int locations = 0;
@@ -93,9 +94,11 @@ inline Instance loadInstance(const std::string& path) {
     in >> data.locations;
     data.alpha.assign(data.m, -1);
     data.beta.assign(data.m, -1);
+    data.locationNames.resize(data.locations);
     for (int i = 0; i < data.locations; ++i) {
         std::string name;
         in >> name;
+        data.locationNames[i] = name;
         int index = locationIndex(name, data.m);
         if (index == -2) data.o = i;
         else if (index == -3) data.f = i;

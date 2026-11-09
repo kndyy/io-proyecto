@@ -15,11 +15,23 @@ struct Candidate {
     std::vector<std::vector<int>> sequence;
 };
 
+enum class LogType { Process, Pickup, Deliver, Move };
+
+struct LogEvent {
+    LogType type;
+    int resource;
+    int lot;
+    int from;
+    int to;
+    long double start;
+};
+
 struct Result {
     bool feasible = false;
     std::vector<long double> completion;
     std::vector<long double> processStart;
     std::vector<long double> processEnd;
+    std::vector<LogEvent> log;
     long double mean = std::numeric_limits<long double>::infinity();
     long double blockedTime = 0;
     int blockedCount = 0;
@@ -105,6 +117,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         long double end = now + in.duration(lot, j);
         result.processStart[lot] = now;
         result.processEnd[lot] = end;
+        result.log.push_back({LogType::Process, j, lot, -1, -1, now});
         events.push({end, 0, j});
     };
 
@@ -201,6 +214,9 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.load.clear();
         agv.step = 0;
         agv.active = true;
+        if (agv.position != in.o) {
+            result.log.push_back({LogType::Move, k, -1, agv.position, in.o, now});
+        }
         events.push({now + in.tau[agv.position][in.o], 1, k});
         return true;
     };
@@ -267,7 +283,11 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.load.clear();
         agv.step = 0;
         agv.active = true;
-        events.push({now + in.tau[agv.position][in.beta[chosen.front()]], 1, k});
+        int first = in.beta[chosen.front()];
+        if (agv.position != first) {
+            result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
+        }
+        events.push({now + in.tau[agv.position][first], 1, k});
         return true;
     };
 
@@ -288,6 +308,9 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         auto& agv = agvs[k];
         sim::Step step = agv.route[agv.step];
         if (step.action == sim::Action::PickIn) {
+            for (int lot : agv.incoming) {
+                result.log.push_back({LogType::Pickup, k, lot, in.o, -1, now});
+            }
             agv.load = agv.incoming;
             agv.incoming.clear();
         } else if (step.action == sim::Action::DropAlpha) {
@@ -295,6 +318,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             machines[j].input = step.lot;
             machines[j].inputReserved = false;
             agv.load.erase(std::find(agv.load.begin(), agv.load.end(), step.lot));
+            result.log.push_back({LogType::Deliver, k, step.lot, step.destination, -1, now});
         } else if (step.action == sim::Action::PickBeta) {
             int j = betaMachine[step.destination];
             auto& m = machines[j];
@@ -308,8 +332,12 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                 result.blockedTime += now - m.blockStart;
             }
             agv.load.push_back(step.lot);
+            result.log.push_back({LogType::Pickup, k, step.lot, step.destination, -1, now});
         } else {
-            for (int lot : agv.load) result.completion[lot] = now;
+            for (int lot : agv.load) {
+                result.completion[lot] = now;
+                result.log.push_back({LogType::Deliver, k, lot, in.f, -1, now});
+            }
             delivered += static_cast<int>(agv.load.size());
             agv.load.clear();
         }
@@ -317,6 +345,9 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         ++agv.step;
         if (agv.step < agv.route.size()) {
             int destination = agv.route[agv.step].destination;
+            if (agv.position != destination) {
+                result.log.push_back({LogType::Move, k, -1, agv.position, destination, now});
+            }
             events.push({now + in.tau[agv.position][destination], 1, k});
         } else {
             agv.active = false;

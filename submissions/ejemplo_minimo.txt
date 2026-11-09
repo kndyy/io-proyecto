@@ -1,0 +1,9 @@
+recurso;orden;accion;lote;ubicacion;destino;inicio
+M1;1;PROCESS;1;;;10
+AGV1;1;PICKUP;1;o;;0
+AGV1;2;MOVE;;o;a1;0
+AGV1;3;DELIVER;1;a1;;10
+AGV1;4;MOVE;;a1;b1;10
+AGV1;5;PICKUP;1;b1;;20
+AGV1;6;MOVE;;b1;f;20
+AGV1;7;DELIVER;1;f;;30
