@@ -1,0 +1,39 @@
+name: IO1 phase dispatcher monitor
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - main.cpp
+      - instance.hpp
+      - simulator.hpp
+      - heuristic.hpp
+      - tools/phase_monitor.py
+      - .github/workflows/phase-monitor.yml
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile with C++20
+        run: g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
+      - name: Existing model tests
+        run: ./io1 --self-test
+      - name: Validate three pilot instances
+        run: python3 tools/phase_monitor.py --only 01,06,10 --evals 400 --neighbors 20 --out monitor_pilot
+      - name: Compare all ten instances
+        run: python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed ${{ github.run_number }} --out monitor_output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase-monitor-${{ github.run_number }}
+          path: |
+            monitor_output/summary.csv
+            monitor_pilot/summary.csv
+          retention-days: 30
