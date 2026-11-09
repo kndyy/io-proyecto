@@ -1,0 +1,129 @@
+=== instancia_01 ===
+conteo: MACHINE_OR_BUFFER=2
+01. [MACHINE_OR_BUFFER] lot 3 starts PROCESS on M2 at 214.727272727000 before machine release at 214.727272727273 (diff -2.727e-10)
+02. [MACHINE_OR_BUFFER] lot 1 starts PROCESS on M4 at 142.727272727000 before machine release at 142.727272727273 (diff -2.727e-10)
+
+=== instancia_02 ===
+conteo: MACHINE_OR_BUFFER=5
+01. [MACHINE_OR_BUFFER] lot 6 starts PROCESS on M1 at 577.714285714000 before machine release at 577.714285714429 (diff -4.286e-10)
+02. [MACHINE_OR_BUFFER] lot 26 starts PROCESS on M2 at 237.181818182000 before machine release at 237.181818182273 (diff -2.727e-10)
+03. [MACHINE_OR_BUFFER] lot 8 starts PROCESS on M2 at 461.545454545000 before machine release at 461.545454545455 (diff -4.546e-10)
+04. [MACHINE_OR_BUFFER] lot 1 starts PROCESS on M4 at 493.727272727000 before machine release at 493.727272727273 (diff -2.727e-10)
+05. [MACHINE_OR_BUFFER] lot 11 starts PROCESS on M4 at 793.727272727000 before machine release at 793.727272727455 (diff -4.545e-10)
+
+=== instancia_03 ===
+conteo: MACHINE_OR_BUFFER=4
+01. [MACHINE_OR_BUFFER] lot 6 starts PROCESS on M2 at 559.545454545000 before machine release at 559.545454545455 (diff -4.545e-10)
+02. [MACHINE_OR_BUFFER] lot 24 starts PROCESS on M2 at 893.727272727000 before machine release at 893.727272727273 (diff -2.727e-10)
+03. [MACHINE_OR_BUFFER] lot 35 starts PROCESS on M3 at 261.857142857000 before machine release at 261.857142857143 (diff -1.429e-10)
+04. [MACHINE_OR_BUFFER] lot 39 starts PROCESS on M5 at 556.333333333000 before machine release at 556.333333333667 (diff -6.667e-10)
+
+=== instancia_04 ===
+conteo: MACHINE_OR_BUFFER=14
+01. [MACHINE_OR_BUFFER] lot 21 starts PROCESS on M1 at 300.714285714000 before machine release at 300.714285714286 (diff -2.857e-10)
+02. [MACHINE_OR_BUFFER] lot 47 starts PROCESS on M1 at 548.571428571000 before machine release at 548.571428571143 (diff -1.429e-10)
+03. [MACHINE_OR_BUFFER] lot 55 starts PROCESS on M2 at 429.727272727000 before machine release at 429.727272727727 (diff -7.273e-10)
+04. [MACHINE_OR_BUFFER] lot 37 starts PROCESS on M2 at 775.181818182000 before machine release at 775.181818182273 (diff -2.727e-10)
+05. [MACHINE_OR_BUFFER] lot 42 starts PROCESS on M2 at 911.545454545000 before machine release at 911.545454545636 (diff -6.364e-10)
+06. [MACHINE_OR_BUFFER] lot 52 starts PROCESS on M4 at 251.818181818000 before machine release at 251.818181818455 (diff -4.545e-10)
+07. [MACHINE_OR_BUFFER] lot 2 starts PROCESS on M4 at 593.727272727000 before machine release at 593.727272727455 (diff -4.545e-10)
+08. [MACHINE_OR_BUFFER] lot 1 starts PROCESS on M4 at 875.545454545000 before machine release at 875.545454545909 (diff -9.092e-10)
+09. [MACHINE_OR_BUFFER] lot 23 starts PROCESS on M5 at 772.000000000000 before machine release at 772.000000000333 (diff -3.333e-10)
+10. [MACHINE_OR_BUFFER] lot 6 starts PROCESS on M6 at 434.333333333000 before machine release at 434.333333333333 (diff -3.334e-10)
+11. [MACHINE_OR_BUFFER] lot 8 starts PROCESS on M6 at 751.000000000000 before machine release at 751.000000000222 (diff -2.221e-10)
+12. [MACHINE_OR_BUFFER] lot 49 starts PROCESS on M6 at 884.333333333000 before machine release at 884.333333333333 (diff -3.333e-10)
+13. [MACHINE_OR_BUFFER] lot 31 starts PROCESS on M7 at 179.444444444000 before machine release at 179.444444444444 (diff -4.445e-10)
+14. [MACHINE_OR_BUFFER] lot 24 starts PROCESS on M7 at 1012.638888889000 before machine release at 1012.638888889111 (diff -1.111e-10)
+
+=== instancia_05 ===
+conteo: MACHINE_OR_BUFFER=13
+01. [MACHINE_OR_BUFFER] lot 45 starts PROCESS on M1 at 206.571428571000 before machine release at 206.571428571429 (diff -4.285e-10)
+02. [MACHINE_OR_BUFFER] lot 69 starts PROCESS on M1 at 749.714285714000 before machine release at 749.714285714714 (diff -7.144e-10)
+03. [MACHINE_OR_BUFFER] lot 51 starts PROCESS on M2 at 107.727272727000 before machine release at 107.727272727273 (diff -2.727e-10)
+04. [MACHINE_OR_BUFFER] lot 7 starts PROCESS on M2 at 595.727272727000 before machine release at 595.727272727273 (diff -2.727e-10)
+05. [MACHINE_OR_BUFFER] lot 74 starts PROCESS on M2 at 895.727272727000 before machine release at 895.727272727364 (diff -3.636e-10)
+06. [MACHINE_OR_BUFFER] lot 71 starts PROCESS on M4 at 806.558441558000 before machine release at 806.558441558909 (diff -9.090e-10)
+07. [MACHINE_OR_BUFFER] lot 14 starts PROCESS on M4 at 1106.558441558000 before machine release at 1106.558441558091 (diff -9.095e-11)
+08. [MACHINE_OR_BUFFER] lot 75 starts PROCESS on M5 at 911.500000000000 before machine release at 911.500000000333 (diff -3.333e-10)
+09. [MACHINE_OR_BUFFER] lot 73 starts PROCESS on M5 at 1057.333333333000 before machine release at 1057.333333333333 (diff -3.333e-10)
+10. [MACHINE_OR_BUFFER] lot 65 starts PROCESS on M6 at 103.111111111000 before machine release at 103.111111111111 (diff -1.111e-10)
+11. [MACHINE_OR_BUFFER] lot 40 starts PROCESS on M6 at 325.333333333000 before machine release at 325.333333333556 (diff -5.556e-10)
+12. [MACHINE_OR_BUFFER] lot 3 starts PROCESS on M6 at 603.111111111000 before machine release at 603.111111111444 (diff -4.444e-10)
+13. [MACHINE_OR_BUFFER] lot 32 starts PROCESS on M7 at 972.972222222000 before machine release at 972.972222222333 (diff -3.333e-10)
+
+=== instancia_06 ===
+conteo: MACHINE_OR_BUFFER=13
+01. [MACHINE_OR_BUFFER] lot 84 starts PROCESS on M1 at 112.714285714000 before machine release at 112.714285714286 (diff -2.857e-10)
+02. [MACHINE_OR_BUFFER] lot 70 starts PROCESS on M1 at 1670.857142857000 before machine release at 1670.857142857143 (diff -1.428e-10)
+03. [MACHINE_OR_BUFFER] lot 58 starts PROCESS on M2 at 291.727272727000 before machine release at 291.727272727364 (diff -3.636e-10)
+04. [MACHINE_OR_BUFFER] lot 44 starts PROCESS on M2 at 975.636363636000 before machine release at 975.636363636364 (diff -3.636e-10)
+05. [MACHINE_OR_BUFFER] lot 3 starts PROCESS on M2 at 1371.090909091000 before machine release at 1371.090909091273 (diff -2.728e-10)
+06. [MACHINE_OR_BUFFER] lot 82 starts PROCESS on M2 at 1762.000000000000 before machine release at 1762.000000000273 (diff -2.728e-10)
+07. [MACHINE_OR_BUFFER] lot 95 starts PROCESS on M3 at 904.714285714000 before machine release at 904.714285714286 (diff -2.858e-10)
+08. [MACHINE_OR_BUFFER] lot 23 starts PROCESS on M4 at 161.857142857000 before machine release at 161.857142857143 (diff -1.428e-10)
+09. [MACHINE_OR_BUFFER] lot 56 starts PROCESS on M4 at 1341.883116883000 before machine release at 1341.883116883545 (diff -5.455e-10)
+10. [MACHINE_OR_BUFFER] lot 13 starts PROCESS on M4 at 1764.857142857000 before machine release at 1764.857142857143 (diff -1.428e-10)
+11. [MACHINE_OR_BUFFER] lot 20 starts PROCESS on M6 at 1014.111111111000 before machine release at 1014.111111111111 (diff -1.111e-10)
+12. [MACHINE_OR_BUFFER] lot 36 starts PROCESS on M7 at 1382.222222222000 before machine release at 1382.222222222222 (diff -2.221e-10)
+13. [MACHINE_OR_BUFFER] lot 86 starts PROCESS on M7 at 1724.583333333000 before machine release at 1724.583333333111 (diff -1.112e-10)
+
+=== instancia_07 ===
+conteo: MACHINE_OR_BUFFER=7
+01. [MACHINE_OR_BUFFER] lot 70 starts PROCESS on M1 at 2013.142857143000 before machine release at 2013.142857143286 (diff -2.858e-10)
+02. [MACHINE_OR_BUFFER] lot 49 starts PROCESS on M2 at 1575.909090909000 before machine release at 1575.909090909091 (diff -9.095e-11)
+03. [MACHINE_OR_BUFFER] lot 114 starts PROCESS on M2 at 2018.000000000000 before machine release at 2018.000000000364 (diff -3.638e-10)
+04. [MACHINE_OR_BUFFER] lot 101 starts PROCESS on M2 at 2158.909090909000 before machine release at 2158.909090909091 (diff -9.095e-11)
+05. [MACHINE_OR_BUFFER] lot 105 starts PROCESS on M3 at 544.571428571000 before machine release at 544.571428571429 (diff -4.286e-10)
+06. [MACHINE_OR_BUFFER] lot 106 starts PROCESS on M4 at 500.636363636000 before machine release at 500.636363636636 (diff -6.364e-10)
+07. [MACHINE_OR_BUFFER] lot 92 starts PROCESS on M4 at 1592.909090909000 before machine release at 1592.909090909091 (diff -9.095e-11)
+
+=== instancia_08 ===
+conteo: MACHINE_OR_BUFFER=12
+01. [MACHINE_OR_BUFFER] lot 152 starts PROCESS on M1 at 1687.857142857000 before machine release at 1687.857142857143 (diff -1.428e-10)
+02. [MACHINE_OR_BUFFER] lot 101 starts PROCESS on M2 at 1638.727272727000 before machine release at 1638.727272727273 (diff -2.728e-10)
+03. [MACHINE_OR_BUFFER] lot 14 starts PROCESS on M2 at 2084.000000000000 before machine release at 2084.000000000182 (diff -1.819e-10)
+04. [MACHINE_OR_BUFFER] lot 97 starts PROCESS on M2 at 2247.636363636000 before machine release at 2247.636363636364 (diff -3.633e-10)
+05. [MACHINE_OR_BUFFER] lot 4 starts PROCESS on M2 at 2388.545454545000 before machine release at 2388.545454545091 (diff -9.095e-11)
+06. [MACHINE_OR_BUFFER] lot 93 starts PROCESS on M2 at 2624.909090909000 before machine release at 2624.909090909545 (diff -5.452e-10)
+07. [MACHINE_OR_BUFFER] lot 51 starts PROCESS on M4 at 1199.818181818000 before machine release at 1199.818181818182 (diff -1.817e-10)
+08. [MACHINE_OR_BUFFER] lot 18 starts PROCESS on M4 at 1848.714285714000 before machine release at 1848.714285714286 (diff -2.858e-10)
+09. [MACHINE_OR_BUFFER] lot 56 starts PROCESS on M4 at 2091.571428571000 before machine release at 2091.571428571143 (diff -1.428e-10)
+10. [MACHINE_OR_BUFFER] lot 73 starts PROCESS on M4 at 2460.571428571000 before machine release at 2460.571428571428 (diff -4.284e-10)
+11. [MACHINE_OR_BUFFER] lot 61 starts PROCESS on M7 at 997.222222222000 before machine release at 997.222222222222 (diff -2.221e-10)
+12. [MACHINE_OR_BUFFER] lot 40 starts PROCESS on M7 at 2698.444444444000 before machine release at 2698.444444444444 (diff -4.443e-10)
+
+=== instancia_09 ===
+conteo: MACHINE_OR_BUFFER=12
+01. [MACHINE_OR_BUFFER] lot 111 starts PROCESS on M2 at 2153.909090909000 before machine release at 2153.909090909091 (diff -9.095e-11)
+02. [MACHINE_OR_BUFFER] lot 49 starts PROCESS on M2 at 2276.636363636000 before machine release at 2276.636363636273 (diff -2.724e-10)
+03. [MACHINE_OR_BUFFER] lot 115 starts PROCESS on M2 at 2633.818181818000 before machine release at 2633.818181818182 (diff -1.819e-10)
+04. [MACHINE_OR_BUFFER] lot 44 starts PROCESS on M2 at 2952.000000000000 before machine release at 2952.000000000363 (diff -3.633e-10)
+05. [MACHINE_OR_BUFFER] lot 40 starts PROCESS on M3 at 162.714285714000 before machine release at 162.714285714286 (diff -2.857e-10)
+06. [MACHINE_OR_BUFFER] lot 15 starts PROCESS on M4 at 73.545454545000 before machine release at 73.545454545455 (diff -4.545e-10)
+07. [MACHINE_OR_BUFFER] lot 57 starts PROCESS on M4 at 1225.000000000000 before machine release at 1225.000000000455 (diff -4.545e-10)
+08. [MACHINE_OR_BUFFER] lot 9 starts PROCESS on M4 at 1756.818181818000 before machine release at 1756.818181818182 (diff -1.817e-10)
+09. [MACHINE_OR_BUFFER] lot 56 starts PROCESS on M4 at 2112.545454545000 before machine release at 2112.545454545455 (diff -4.543e-10)
+10. [MACHINE_OR_BUFFER] lot 62 starts PROCESS on M5 at 2192.833333333000 before machine release at 2192.833333333333 (diff -3.333e-10)
+11. [MACHINE_OR_BUFFER] lot 159 starts PROCESS on M6 at 1785.444444444000 before machine release at 1785.444444444444 (diff -4.443e-10)
+12. [MACHINE_OR_BUFFER] lot 36 starts PROCESS on M11 at 1931.333333333000 before machine release at 1931.333333333333 (diff -3.333e-10)
+
+=== instancia_10 ===
+conteo: MACHINE_OR_BUFFER=16
+01. [MACHINE_OR_BUFFER] lot 141 starts PROCESS on M1 at 105.571428571000 before machine release at 105.571428571429 (diff -4.286e-10)
+02. [MACHINE_OR_BUFFER] lot 102 starts PROCESS on M1 at 373.714285714000 before machine release at 373.714285714286 (diff -2.857e-10)
+03. [MACHINE_OR_BUFFER] lot 86 starts PROCESS on M2 at 1711.909090909000 before machine release at 1711.909090909091 (diff -9.095e-11)
+04. [MACHINE_OR_BUFFER] lot 63 starts PROCESS on M2 at 2598.090909091000 before machine release at 2598.090909091272 (diff -2.724e-10)
+05. [MACHINE_OR_BUFFER] lot 105 starts PROCESS on M2 at 2720.818181818000 before machine release at 2720.818181818272 (diff -2.724e-10)
+06. [MACHINE_OR_BUFFER] lot 23 starts PROCESS on M4 at 458.571428571000 before machine release at 458.571428571429 (diff -4.285e-10)
+07. [MACHINE_OR_BUFFER] lot 32 starts PROCESS on M4 at 690.818181818000 before machine release at 690.818181818182 (diff -1.818e-10)
+08. [MACHINE_OR_BUFFER] lot 136 starts PROCESS on M4 at 1292.636363636000 before machine release at 1292.636363636364 (diff -3.638e-10)
+09. [MACHINE_OR_BUFFER] lot 145 starts PROCESS on M4 at 2107.857142857000 before machine release at 2107.857142857571 (diff -5.716e-10)
+10. [MACHINE_OR_BUFFER] lot 215 starts PROCESS on M4 at 2718.636363636000 before machine release at 2718.636363636364 (diff -3.633e-10)
+11. [MACHINE_OR_BUFFER] lot 160 starts PROCESS on M5 at 2783.333333333000 before machine release at 2783.333333333333 (diff -3.333e-10)
+12. [MACHINE_OR_BUFFER] lot 104 starts PROCESS on M6 at 1664.111111111000 before machine release at 1664.111111111111 (diff -1.112e-10)
+13. [MACHINE_OR_BUFFER] lot 139 starts PROCESS on M6 at 2523.111111111000 before machine release at 2523.111111111111 (diff -1.114e-10)
+14. [MACHINE_OR_BUFFER] lot 194 starts PROCESS on M6 at 2684.222222222000 before machine release at 2684.222222222111 (diff -1.114e-10)
+15. [MACHINE_OR_BUFFER] lot 82 starts PROCESS on M6 at 2806.444444444000 before machine release at 2806.444444444222 (diff -2.219e-10)
+16. [MACHINE_OR_BUFFER] lot 164 starts PROCESS on M11 at 2269.444444444000 before machine release at 2269.444444444444 (diff -4.443e-10)
+
+TOTAL_ERRORES=98

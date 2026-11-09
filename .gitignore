@@ -4,3 +4,6 @@ io1_asan
 core
 core.*
 results/internal/
+
+__pycache__/
+*.pyc

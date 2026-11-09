@@ -66,6 +66,9 @@ python3 tools/io1_helper.py test
 python3 tools/io1_helper.py bench
 python3 tools/io1_helper.py bench --strategies b1,b2,b3,s0,s1,s2,vnd,vnd-s0,vnd-s1,vnd-s2
 python3 tools/io1_helper.py run --instance instances/instancia_10.io1 --strategy vnd --out results/internal/resultado_10.csv
+python3 tools/validate_txt.py instances/instancia_01.io1 submissions/instancia_01.txt
+python3 tools/diagnose_txt.py
+python3 tools/make_submissions.py
 ```
 
 `bench` escribe `results/results.csv`, imprime el ranking y genera `results/recommended_selector.conf` con la estrategia de menor razón media frente al mejor resultado de cada instancia.
@@ -76,26 +79,53 @@ El binario exporta el formato oficial con `--txt`:
 
 ```bash
 ./io1 --input instances/instancia_01.io1 --strategy vnd --txt submissions/instancia_01.txt
+./io1 --input instances/instancia_01.io1 --from-txt warmstart/instancia_01.txt \
+     --max-evals 30000 --max-neighbors 1000 --seed 20261106 \
+     --txt submissions/instancia_01.txt
 ```
+
+`--from-txt` recupera solo el orden de procesos por máquina de un envío previo y vuelve a simular el despacho de AGVs con el simulador actual.
 
 Los envíos generados están en `submissions/`:
 
 | Archivo | Media | Configuración |
 |---|---:|---|
-| `submissions/instancia_01.txt` | 359.050000 | 1000 eval, 200 vecinos, seed 20261106 |
-| `submissions/instancia_02.txt` | 464.691964 | 30000 eval, 1000 vecinos, seed 9001 |
-| `submissions/instancia_03.txt` | 577.834940 | 10000 eval, 500 vecinos, seed 9001 |
-| `submissions/instancia_04.txt` | 602.349363 | 10000 eval, 500 vecinos, seed 3 |
-| `submissions/instancia_05.txt` | 715.949648 | 30000 eval, 1000 vecinos, seed 9001 |
-| `submissions/instancia_06.txt` | 1039.823463 | 10000 eval, 500 vecinos, seed 9001 |
-| `submissions/instancia_07.txt` | 1258.691111 | 30000 eval, 1000 vecinos, seed 55555 |
-| `submissions/instancia_08.txt` | 1487.776149 | 30000 eval, 1000 vecinos, seed 9001 |
-| `submissions/instancia_09.txt` | 1562.029433 | 30000 eval, 1000 vecinos, seed 9001 |
-| `submissions/instancia_10.txt` | 1549.265496 | 30000 eval, 1000 vecinos, seed 3 |
+| `submissions/instancia_01.txt` | 359.050000 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
+| `submissions/instancia_02.txt` | 464.691965 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
+| `submissions/instancia_03.txt` | 577.834941 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
+| `submissions/instancia_04.txt` | 601.000415 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
+| `submissions/instancia_05.txt` | 727.121474 | 30000 eval, 1000 vecinos, seed 12345, warm start |
+| `submissions/instancia_06.txt` | 1034.450920 | 30000 eval, 1000 vecinos, seed 9001, warm start |
+| `submissions/instancia_07.txt` | 1248.372728 | 30000 eval, 1000 vecinos, seed 3, warm start |
+| `submissions/instancia_08.txt` | 1490.944745 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
+| `submissions/instancia_09.txt` | 1558.192027 | 30000 eval, 1000 vecinos, seed 42, warm start |
+| `submissions/instancia_10.txt` | 1549.173382 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
 
 `submissions/ejemplo_minimo.txt` reproduce el ejemplo canónico de un lote de la documentación. El ejemplo verificado de 1062 s no estaba incluido completo en los materiales recibidos.
 
 Cada envío se valida con `tools/validate_txt.py`, que comprueba cabecera, columnas, recursos canónicos, capacidades, posiciones, movimientos, buffers y precedencias, y recalcula la media desde las entregas en `f`. `tools/make_submissions.py` regenera los diez archivos y `submissions/manifest.csv`.
+
+
+## Diagnóstico de factibilidad
+
+El checker rechazó el primer envío con:
+
+```text
+lot 3 starts PROCESS on M2 at 214.727 before machine release at 214.727
+MACHINE_OR_BUFFER
+```
+
+El diagnóstico se ejecuta con `python3 tools/diagnose_txt.py`:
+
+- `diagnostics/diagnostico_antes.txt`: 98 errores en las 10 instancias, todos `MACHINE_OR_BUFFER`.
+- `diagnostics/diagnostico.txt`: 0 errores con tolerancia `1e-12` después de la corrección.
+- `diagnostics/diagnostico_resumen.txt`: causa raíz y criterio de corrección.
+
+Causa: el proceso siguiente podía empezar exactamente en el fin del anterior. Al imprimir con 9 decimales, el checker reconstruía el fin como `inicio_anterior + q/v`, que quedaba hasta `2.7e-10` por encima del nuevo `inicio` impreso, y rechazaba la igualdad numérica.
+
+Corrección: se aplica un margen sistemático de `1e-8 s` en las transiciones recurso-liberado → acción dependiente (inicio de proceso tras proceso, entrega en alpha o desbloqueo; acción de AGV tras un MOVE) y se exporta con 12 decimales. No hay parches por instancia: es un invariante del simulador. El margen mínimo medido en los envíos es aproximadamente `1e-8 s`.
+
+El validador TXT comprueba consistencia y factibilidad, no optimalidad. La calidad sigue dependiendo de la búsqueda; el siguiente paso es mejorar el objetivo, no la legalidad.
 
 ## Resultados actuales
 
@@ -103,26 +133,26 @@ Diez instancias oficiales, semilla `20261106`, presupuesto académico fijo.
 
 | Instancia | B1 | B2 | B3 | S0 | S1 | S2 | VND | Mejora vs mejor baseline | CPU VND (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 01 | 524.10 | 449.20 | 453.00 | 401.93 | 401.93 | 392.77 | **367.61** | 18.16% | 19.3 |
-| 02 | 770.46 | 681.16 | 564.46 | 518.37 | 518.37 | 564.70 | **488.19** | 13.51% | 19.9 |
-| 03 | 1063.89 | 943.46 | 715.28 | 650.01 | 648.30 | 644.79 | **600.70** | 16.02% | 35.4 |
-| 04 | 1380.06 | 1236.00 | 710.20 | 666.18 | 683.79 | 697.97 | **629.76** | 11.33% | 34.1 |
-| 05 | 1796.55 | 1650.40 | 874.77 | 828.15 | 863.41 | 828.10 | **774.55** | 11.46% | 48.9 |
-| 06 | 2224.82 | 1986.91 | 1214.78 | 1173.05 | 1183.54 | 1168.12 | **1113.39** | 8.35% | 54.5 |
-| 07 | 2745.05 | 2524.94 | 1429.60 | 1417.94 | 1425.80 | 1387.94 | **1314.55** | 8.05% | 141.2 |
-| 08 | 2436.29 | 2333.21 | 1718.34 | 1742.02 | 1744.52 | 1628.46 | **1600.04** | 6.88% | 136.7 |
-| 09 | 2877.88 | 2789.09 | 1859.62 | 1693.10 | 1760.95 | 1785.95 | **1618.11** | 12.99% | 253.2 |
-| 10 | 3276.10 | 3186.61 | 1810.99 | 1795.54 | 1708.63 | 1838.49 | **1636.28** | 9.65% | 225.0 |
+| 01 | 524.10 | 449.20 | 453.00 | 401.93 | 401.93 | 392.77 | **367.61** | 18.16% | 30.4 |
+| 02 | 770.46 | 681.16 | 567.55 | 518.37 | 518.37 | 564.70 | **488.19** | 13.98% | 22.1 |
+| 03 | 1063.89 | 943.46 | 715.28 | 651.50 | 648.30 | 644.79 | **600.70** | 16.02% | 30.9 |
+| 04 | 1380.06 | 1236.00 | 712.51 | 666.18 | 683.79 | 697.97 | **621.47** | 12.78% | 89.3 |
+| 05 | 1796.55 | 1649.41 | 874.77 | 837.18 | 822.41 | 825.63 | **770.23** | 11.95% | 77.3 |
+| 06 | 2253.57 | 2005.30 | 1214.78 | 1173.05 | 1155.76 | 1168.12 | **1100.86** | 9.38% | 100.4 |
+| 07 | 2799.67 | 2433.14 | 1429.60 | 1417.94 | 1426.06 | 1389.59 | **1331.29** | 6.88% | 63.3 |
+| 08 | 2436.29 | 2333.21 | 1717.29 | 1742.02 | 1744.86 | 1623.53 | **1596.17** | 7.05% | 189.1 |
+| 09 | 2877.88 | 2824.82 | 1860.98 | 1780.03 | 1760.95 | 1798.54 | **1656.80** | 10.97% | 145.1 |
+| 10 | 3276.23 | 3186.61 | 1767.67 | 1795.54 | 1744.65 | 1819.36 | **1620.88** | 8.30% | 340.8 |
 
 | Estrategia | Factibles | Razón media vs mejor | CPU media (ms) | Evaluaciones |
 |---|---:|---:|---:|---:|
-| b1 | 10/10 | 1.86757 | 0.11 | 10 |
-| b2 | 10/10 | 1.71160 | 0.16 | 10 |
-| b3 | 10/10 | 1.13450 | 0.12 | 10 |
-| s0 | 10/10 | 1.07290 | 0.29 | 20 |
-| s1 | 10/10 | 1.08054 | 0.27 | 20 |
-| s2 | 10/10 | 1.08261 | 3.00 | 20 |
-| vnd | 10/10 | 1.00000 | 96.81 | 10689 |
+| b1 | 10/10 | 1.87628 | 0.15 | 10 |
+| b2 | 10/10 | 1.71001 | 0.21 | 10 |
+| b3 | 10/10 | 1.13348 | 0.16 | 10 |
+| s0 | 10/10 | 1.08028 | 0.38 | 20 |
+| s1 | 10/10 | 1.07559 | 0.39 | 20 |
+| s2 | 10/10 | 1.08236 | 3.20 | 20 |
+| vnd | 10/10 | 1.00000 | 108.88 | 10984 |
 
 El detalle por ejecución está en `results/results.csv`. `--out` genera un CSV interno; `--txt` genera el archivo oficial y `python3 tools/validate_txt.py <instancia.io1> <envio.txt>` lo valida antes de subirlo.
 
@@ -134,9 +164,11 @@ instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
 selector.conf     selector externo en tiempo de ejecución
-tools/            comparación, generación y validación de envíos
+tools/            comparación, generación, validación y diagnóstico
 instances/        diez instancias oficiales
 materials/        paquete original recibido
 results/          resultados y selector recomendado
-submissions/      envíos TXT por instancia y ejemplo mínimo
+submissions/      envíos TXT corregidos por instancia y ejemplo mínimo
+warmstart/        soluciones previas usadas solo como punto de partida
+diagnostics/      errores antes/después y resumen del diagnóstico
 ```

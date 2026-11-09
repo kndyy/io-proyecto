@@ -1,0 +1,31 @@
+=== instancia_01 ===
+OK
+
+=== instancia_02 ===
+OK
+
+=== instancia_03 ===
+OK
+
+=== instancia_04 ===
+OK
+
+=== instancia_05 ===
+OK
+
+=== instancia_06 ===
+OK
+
+=== instancia_07 ===
+OK
+
+=== instancia_08 ===
+OK
+
+=== instancia_09 ===
+OK
+
+=== instancia_10 ===
+OK
+
+TOTAL_ERRORES=0

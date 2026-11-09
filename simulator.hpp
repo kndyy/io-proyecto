@@ -41,6 +41,7 @@ struct Result {
 namespace sim {
 
 constexpr long double EPS = 1e-12L;
+constexpr long double RELEASE_GUARD = 1e-8L;
 
 enum class Status { Idle, Processing, Blocked };
 enum class Action { PickIn, DropAlpha, PickBeta, DropFinal };
@@ -114,10 +115,11 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         m.input = -1;
         m.current = lot;
         m.status = sim::Status::Processing;
-        long double end = now + in.duration(lot, j);
-        result.processStart[lot] = now;
+        long double start = now + sim::RELEASE_GUARD;
+        long double end = start + in.duration(lot, j);
+        result.processStart[lot] = start;
         result.processEnd[lot] = end;
-        result.log.push_back({LogType::Process, j, lot, -1, -1, now});
+        result.log.push_back({LogType::Process, j, lot, -1, -1, start});
         events.push({end, 0, j});
     };
 
@@ -217,7 +219,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         if (agv.position != in.o) {
             result.log.push_back({LogType::Move, k, -1, agv.position, in.o, now});
         }
-        events.push({now + in.tau[agv.position][in.o], 1, k});
+        events.push({now + in.tau[agv.position][in.o] + sim::RELEASE_GUARD, 1, k});
         return true;
     };
 
@@ -287,7 +289,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         if (agv.position != first) {
             result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
         }
-        events.push({now + in.tau[agv.position][first], 1, k});
+        events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
         return true;
     };
 
@@ -348,7 +350,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             if (agv.position != destination) {
                 result.log.push_back({LogType::Move, k, -1, agv.position, destination, now});
             }
-            events.push({now + in.tau[agv.position][destination], 1, k});
+            events.push({now + in.tau[agv.position][destination] + sim::RELEASE_GUARD, 1, k});
         } else {
             agv.active = false;
             agv.route.clear();

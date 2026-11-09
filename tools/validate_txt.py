@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 HEADER = "recurso;orden;accion;lote;ubicacion;destino;inicio"
-EPS = 1e-6
+EPS = 1e-12
 
 
 def load_instance(path):

@@ -11,16 +11,16 @@ OUTPUT = ROOT / "submissions"
 VALIDATOR = ROOT / "tools" / "validate_txt.py"
 
 CONFIGS = {
-    "instancia_01": (1000, 200, 20261106),
-    "instancia_02": (30000, 1000, 9001),
-    "instancia_03": (10000, 500, 9001),
-    "instancia_04": (10000, 500, 3),
-    "instancia_05": (30000, 1000, 9001),
-    "instancia_06": (10000, 500, 9001),
-    "instancia_07": (30000, 1000, 55555),
-    "instancia_08": (30000, 1000, 9001),
-    "instancia_09": (30000, 1000, 9001),
-    "instancia_10": (30000, 1000, 3),
+    "instancia_01": (30000, 1000, 20261106),
+    "instancia_02": (30000, 1000, 20261106),
+    "instancia_03": (30000, 1000, 20261106),
+    "instancia_04": (30000, 1000, 20261106),
+    "instancia_05": (30000, 1000, 12345),
+    "instancia_06": (30000, 1000, 9001),
+    "instancia_07": (30000, 1000, 3),
+    "instancia_08": (30000, 1000, 20261106),
+    "instancia_09": (30000, 1000, 42),
+    "instancia_10": (30000, 1000, 20261106),
 }
 
 EXAMPLE = """recurso;orden;accion;lote;ubicacion;destino;inicio
@@ -52,8 +52,10 @@ def main():
     for instance in sorted((ROOT / "instances").glob("*.io1")):
         max_evals, max_neighbors, seed = CONFIGS[instance.stem]
         target = OUTPUT / f"{instance.stem}.txt"
+        warmstart = ROOT / "warmstart" / f"{instance.stem}.txt"
         completed = subprocess.run([
             str(BINARY), "--input", str(instance), "--strategy", "vnd",
+            "--from-txt", str(warmstart),
             "--max-evals", str(max_evals), "--max-neighbors", str(max_neighbors),
             "--seed", str(seed), "--txt", str(target),
         ], cwd=ROOT, capture_output=True, text=True)
@@ -78,6 +80,7 @@ def main():
             "max_evals": max_evals,
             "max_neighbors": max_neighbors,
             "seed": seed,
+            "warmstart": str(warmstart.relative_to(ROOT)),
             "txt": str(target.relative_to(ROOT)),
         })
         print(f"{instance.stem}: mean={expected:.6f}")

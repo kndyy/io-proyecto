@@ -1,0 +1,48 @@
+DIAGNOSTICO DE FACTIBILIDAD IO1LAB
+
+Error reportado por la plataforma
+---------------------------------
+Instancia 01, primer error visible:
+
+lot 3 starts PROCESS on M2 at 214.727 before machine release at 214.727
+Diagnostico: MACHINE_OR_BUFFER
+
+Reconstruccion con los datos del TXT
+------------------------------------
+M2 previo: lote 19 inicia en 142.000000000, q=800, v=11, duracion=72.72727272727273.
+Fin reconstruido por el checker: 214.72727272727272.
+Nuevo inicio del lote 3 impreso con 9 decimales: 214.727272727.
+Diferencia: -2.727e-10. El checker no acepta que el inicio sea anterior al release.
+
+Alcance
+-------
+tools/diagnose_txt.py reviso las diez instancias con tolerancia 1e-12.
+diagnostico_antes.txt contiene 98 errores, todos de tipo MACHINE_OR_BUFFER.
+No se encontraron errores de AGV, capacidad, posiciones, buffers ni bloqueos.
+
+Causa raiz
+----------
+El simulador permitia que un proceso comenzara exactamente en el instante de liberacion
+de la maquina. Al serializar con 9 decimales, el checker reconstruia el release desde
+el inicio anterior redondeado mas q/v. El redondeo hacia abajo del nuevo inicio producia
+una diferencia negativa de hasta ~9e-10, suficiente para rechazar la solucion.
+
+Correccion aplicada
+-------------------
+Se impuso un invariante temporal: toda accion dependiente de una liberacion comienza al
+menos 1e-8 segundos despues. Se aplica a:
+- inicio de proceso despues de proceso anterior, entrega en alpha o desbloqueo de beta;
+- accion de AGV despues de un MOVE o de la creacion de la ruta.
+La exportacion usa 12 decimales. No hay casos especiales por instancia ni por lote.
+
+Verificacion
+------------
+diagnostico.txt: 0 errores con tolerancia 1e-12.
+Margen minimo medido en los envios corregidos: ~1e-8 s en las transiciones criticas.
+Los diez TXT de submissions/ pasan tools/validate_txt.py y conservan la media
+recalculada desde las entregas en f.
+
+Limite de esta validacion
+-------------------------
+El TXT solo demuestra consistencia y factibilidad. No demuestra optimalidad.
+El objetivo puede mejorarse con otra busqueda o configuracion sin tocar este invariante.
