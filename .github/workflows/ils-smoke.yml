@@ -31,7 +31,7 @@ jobs:
           mkdir -p results
           : > results/integrated_benchmark.log
           for n in 01 02 03 04 05 06 07 08 09 10; do
-            ./io1 --input "instances/instancia_${n}.io1" --strategy integrated --seed 20261109 --max-evals 10000 --max-neighbors 80 --txt "/tmp/io1_${n}.txt" | tee -a results/integrated_benchmark.log
+            ./io1 --input "instances/instancia_${n}.io1" --strategy integrated --seed 20261109 --max-evals 50000 --max-neighbors 120 --txt "/tmp/io1_${n}.txt" | tee -a results/integrated_benchmark.log
             python3 tools/validate_txt.py "instances/instancia_${n}.io1" "/tmp/io1_${n}.txt"
           done
       - name: Save benchmark to feature branch
