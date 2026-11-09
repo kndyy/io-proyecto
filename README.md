@@ -19,7 +19,7 @@ g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
 El algoritmo se elige en tiempo de ejecución con `selector.conf`. Ese archivo no se compila ni forma parte del binario:
 
 ```ini
-strategy=integrated
+strategy=phase-bucket
 seed=20261109
 max_evals=50000
 max_neighbors=120
@@ -57,7 +57,7 @@ Para cambiar de solución no hace falta recompilar.
 | `alns-joint` | ALNS con destrucción/reparación, prioridades por lote y rutas AGV mixtas | experimental |
 | `phase-bucket` | ILS + despacho de AGVs guiado por fase y viajes de longitud adaptativa | experimental, comparador |
 
-`integrated` es la estrategia por defecto. `alns-joint` está implementada y validada, pero no se selecciona porque solo mejora a `integrated` en la instancia 01. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote. Las estrategias anteriores se conservan para comparación.
+`phase-bucket` es la estrategia por defecto después de superar los diez resultados históricos aceptados en una prueba local validada de 50 000 evaluaciones. `integrated` y `alns-joint` se conservan como comparadores; `alns-joint` es experimental y sus rutas mixtas mostraron bloqueo excesivo. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote. Las estrategias anteriores se conservan para comparación.
 
 Cada estrategia tipo `vnd` prueba `batch_limit=1` y `batch_limit=C`, elige el mejor inicio factible y conserva el mejor resultado global. La búsqueda usa first improvement, 40 vecinos por muestra y hasta 1000 simulaciones por inicio. `integrated` usa `seed=20261109`, `max_evals=50000` y `max_neighbors=120` por defecto.
 
@@ -231,7 +231,7 @@ python3 tools/validate_txt.py instances/instancia_09.io1 /tmp/phase09.txt
 python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed 20261109 --out monitor_output
 ```
 
-El workflow `.github/workflows/phase-monitor.yml` compila, ejecuta los self-tests, compara las diez instancias y guarda CSV/TXT en artefactos temporales de Actions; la corrida diaria es corta y las actualizaciones del código ejecutan una comparación de 50 000 evaluaciones por instancia. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` sigue siendo `integrated` hasta validar el nuevo método en el evaluador oficial.
+El workflow `.github/workflows/phase-monitor.yml` compila, ejecuta los self-tests, compara las diez instancias y guarda CSV/TXT en artefactos temporales de Actions; la corrida diaria es corta y las actualizaciones del código ejecutan una comparación de 50 000 evaluaciones por instancia. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` es `phase-bucket` por sus mejoras locales. Sigue pendiente enviar los TXT nuevos al evaluador oficial; no se automatiza esa publicación.
 
 Referencia: Júlia Bergmann, András Kovács y József Váncza, “AGV scheduling in shopfloor logistics of semiconductor assembly”, *Journal of Manufacturing Systems*, 87 (2026), 27–47, DOI: 10.1016/j.jmsy.2026.05.004. La función de prioridad, las vecindades y el bloqueo son adaptaciones del proyecto, no una reproducción exacta del algoritmo del artículo.
 
