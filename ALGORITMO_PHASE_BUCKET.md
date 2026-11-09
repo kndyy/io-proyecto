@@ -58,6 +58,8 @@ Los coeficientes son parámetros heurísticos fijos de la implementación, no pa
 - VND: movimientos `RELOCATE`, `SWAP` y cambio de sesgo/capacidad, aceptando una mejora estricta de F.
 - ILS: perturbar 2–6 lotes o destruir/reinsertar una fracción; reoptimizar, conservar siempre el mejor encontrado; aceptar ocasionalmente otra solución factible como estado de exploración.
 - Evaluación siempre desde el simulador determinista; el TXT se escribe únicamente para el candidato final.
+- Consistencia: el candidato de `integrated` se vuelve a simular con el decoder de fase antes de compararlo. Así la búsqueda nunca mezcla medias de decoders distintos.
+- Asignación AGV: `phase_global=0` despacha en orden de ID; `phase_global=1` elige globalmente el mejor par AGV-ruta; `phase_global=auto` ejecuta ambas variantes y conserva la mejor por instancia. En `auto`, `--max-evals` se aplica a cada variante.
 
 ## Verificación y seguimiento
 
@@ -65,7 +67,7 @@ Los coeficientes son parámetros heurísticos fijos de la implementación, no pa
 g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
 ./io1 --self-test
 python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed 20261109
-./io1 --input instances/instancia_09.io1 --strategy phase-bucket --seed 20261109 --max-evals 50000 --max-neighbors 120 --txt /tmp/phase09.txt
+./io1 --input instances/instancia_09.io1 --strategy phase-bucket --seed 20261109 --max-evals 50000 --max-neighbors 120 --phase-global auto --txt /tmp/phase09.txt
 python3 tools/validate_txt.py instances/instancia_09.io1 /tmp/phase09.txt
 ```
 
@@ -75,20 +77,20 @@ El monitor valida los diez TXT con `tools/validate_txt.py`, compara frente a la 
 
 En la prueba reproducible de 50 000 evaluaciones con semilla 20261109 se superaron los diez mejores valores aceptados previamente. La comparación siguió usando los diez verificadores de factibilidad. Esta tabla es evidencia de una ejecución, no una garantía de optimalidad ni de superioridad para cualquier semilla.
 
-| Instancia | Referencia aceptada | Phase-bucket 50k |
-|---|---:|---:|
-| 01 | 351.0000 | 350.3455 |
-| 02 | 450.3642 | 441.5838 |
-| 03 | 566.7783 | 527.7851 |
-| 04 | 591.5508 | 573.9218 |
-| 05 | 716.0324 | 654.5154 |
-| 06 | 998.9354 | 915.8698 |
-| 07 | 1207.7515 | 1113.1552 |
-| 08 | 1426.5020 | 1295.6499 |
-| 09 | 1477.9573 | 1319.5259 |
-| 10 | 1488.6675 | 1312.0424 |
+| Instancia | Referencia inicial | Phase-bucket final | Configuración |
+|---|---:|---:|---|
+| 01 | 351.0000 | 346.2273 | auto 50k |
+| 02 | 450.3642 | 441.5838 | id 50k |
+| 03 | 566.7783 | 525.0072 | global 50k |
+| 04 | 591.5508 | 572.0348 | global 50k |
+| 05 | 716.0324 | 654.5154 | id 50k |
+| 06 | 998.9354 | 903.3088 | global 50k |
+| 07 | 1207.7515 | 1091.3296 | global 100k |
+| 08 | 1426.5020 | 1295.6499 | id 50k |
+| 09 | 1477.9573 | 1294.2657 | global 50k |
+| 10 | 1488.6675 | 1308.1711 | id 100k |
 
-Resultado registrado en [GitHub Actions — monitor 50k](https://github.com/kndyy/io-proyecto/actions/runs/42674605687). No se realizó envío automático a IO1Lab; este continúa pendiente para confirmar los nuevos valores.
+El benchmark inicial de 50k está en [GitHub Actions — monitor 50k](https://github.com/kndyy/io-proyecto/actions/runs/42674605687). Después se probaron los dos modos de asignación y presupuestos de 100k para las instancias con mayor brecha. Los diez TXT finales fueron enviados con Playwright y aceptados por IO1Lab; los valores oficiales y la configuración por instancia están en `results/platform_validation.csv`.
 
 ## Auditoría de alns-joint
 

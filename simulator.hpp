@@ -21,6 +21,7 @@ struct Candidate {
     std::vector<std::int8_t> priorityOut;
     bool mixedRoutes = false;
     bool phaseAware = false;
+    bool phaseGlobal = false;
     int phaseBias = 0;
 };
 
@@ -112,6 +113,12 @@ struct MixedRoute {
     std::vector<int> outLots;
     long double score = -std::numeric_limits<long double>::infinity();
     long double length = 0;
+};
+
+struct PhaseChoice {
+    bool output = false;
+    std::vector<int> machines;
+    long double score = -std::numeric_limits<long double>::infinity();
 };
 
 }
@@ -620,15 +627,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
     };
 
 
-    auto createPhaseRoute = [&](int k) {
+    auto phaseBestChoice = [&](int k) {
         auto& agv = agvs[k];
         const long double H = std::max(1.0L, in.medianTau);
-        struct Choice {
-            bool output = false;
-            std::vector<int> machines;
-            long double score = -std::numeric_limits<long double>::infinity();
-        };
-        Choice best;
+        sim::PhaseChoice best;
         auto eligible = [&](int j, bool output) {
             const auto& m = machines[j];
             return output ? (m.output >= 0 && !m.outputReserved)
@@ -638,7 +640,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         auto location = [&](int j, bool output) {
             return output ? in.beta[j] : in.alpha[j];
         };
-        auto scoreRoute = [&](const Choice& route) {
+        auto scoreRoute = [&](const sim::PhaseChoice& route) {
             long double t = route.output ? 0 : in.tau[agv.position][in.o];
             int last = route.output ? agv.position : in.o;
             long double benefit = 0;
@@ -673,7 +675,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         for (bool output : {false, true}) {
             for (int seed = 0; seed < in.m; ++seed) {
                 if (!eligible(seed, output)) continue;
-                Choice route;
+                sim::PhaseChoice route;
                 route.output = output;
                 route.machines.push_back(seed);
                 long double score = scoreRoute(route);
@@ -688,7 +690,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                         if (!eligible(j, output) ||
                             std::find(route.machines.begin(), route.machines.end(), j)
                                 != route.machines.end()) continue;
-                        Choice trial = route;
+                        sim::PhaseChoice trial = route;
                         trial.machines.push_back(j);
                         long double value = scoreRoute(trial);
                         if (value > nextScore) {
@@ -705,7 +707,11 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                 }
             }
         }
-        if (best.machines.empty()) return false;
+        return best;
+    };
+
+    auto applyPhaseChoice = [&](int k, const sim::PhaseChoice& best) {
+        auto& agv = agvs[k];
         agv.route.clear();
         agv.incoming.clear();
         agv.load.clear();
@@ -735,7 +741,6 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
         result.emptyTravel += in.tau[agv.position][first];
         events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
-        return true;
     };
 
     auto settle = [&]() {
@@ -747,7 +752,34 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         for (int k = 0; k < in.K; ++k) {
             if (agvs[k].active) continue;
             if (candidate.phaseAware) {
-                createPhaseRoute(k);
+                if (candidate.phaseGlobal) {
+                    std::vector<char> free(in.K, 0);
+                    for (int q = 0; q < in.K; ++q) free[q] = agvs[q].active ? 0 : 1;
+                    while (true) {
+                        int bestK = -1;
+                        sim::PhaseChoice bestChoice;
+                        for (int q = 0; q < in.K; ++q) {
+                            if (!free[q]) continue;
+                            sim::PhaseChoice choice = phaseBestChoice(q);
+                            if (choice.machines.empty()) continue;
+                            bool tie = std::fabs(choice.score - bestChoice.score) <= sim::EPS;
+                            if (bestK < 0 || choice.score > bestChoice.score + sim::EPS ||
+                                (tie && q < bestK)) {
+                                bestK = q;
+                                bestChoice = std::move(choice);
+                            }
+                        }
+                        if (bestK < 0) break;
+                        applyPhaseChoice(bestK, bestChoice);
+                        free[bestK] = 0;
+                    }
+                } else {
+                    for (int q = 0; q < in.K; ++q) {
+                        if (agvs[q].active) continue;
+                        sim::PhaseChoice choice = phaseBestChoice(q);
+                        if (!choice.machines.empty()) applyPhaseChoice(q, choice);
+                    }
+                }
                 continue;
             }
             if (candidate.mixedRoutes) {

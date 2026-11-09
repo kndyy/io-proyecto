@@ -19,6 +19,7 @@ struct Options {
     std::uint64_t seed = 20261106;
     int maxEvals = 1000;
     int maxNeighbors = 40;
+    int phaseGlobal = -1;
 };
 
 struct Outcome {
@@ -967,12 +968,19 @@ inline bool phaseImprove(const Instance& in, SearchState& state,
         else {
             for (int batch = 1; batch <= in.C && !improved; ++batch) {
                 for (int bias = -5; bias <= 5 && !improved; ++bias) {
-                    Candidate variant = state.candidate;
-                    variant.phaseAware = true;
-                    variant.phaseBias = bias;
-                    if (variant.phaseBias == state.candidate.phaseBias &&
-                        batch == state.batchLimit) continue;
-                    improved = phaseTest(in, state, variant, batch);
+                    for (bool global : {false, true}) {
+                        if (improved) break;
+                        if (options.phaseGlobal >= 0 &&
+                            global != (options.phaseGlobal == 1)) continue;
+                        Candidate variant = state.candidate;
+                        variant.phaseAware = true;
+                        variant.phaseGlobal = global;
+                        variant.phaseBias = bias;
+                        if (variant.phaseBias == state.candidate.phaseBias &&
+                            variant.phaseGlobal == state.candidate.phaseGlobal &&
+                            batch == state.batchLimit) continue;
+                        improved = phaseTest(in, state, variant, batch);
+                    }
                 }
             }
         }
@@ -982,25 +990,36 @@ inline bool phaseImprove(const Instance& in, SearchState& state,
     return changed;
 }
 
-inline Outcome solvePhaseBucket(const Instance& in, const Options& options) {
+inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) {
     int budget = std::max(1, options.maxEvals);
     int initial = std::max(1, budget / 3);
     Outcome integrated = solveIntegrated(in,
         Options{options.seed, initial, options.maxNeighbors});
+    Candidate start = integrated.candidate;
+    start.phaseAware = true;
+    start.mixedRoutes = false;
+    start.phaseBias = 0;
+    start.phaseGlobal = options.phaseGlobal == 1;
     SearchState best;
-    best.candidate = integrated.candidate;
-    best.result = integrated.result;
+    best.candidate = start;
+    best.result = simulate(in, start, integrated.batchLimit, false);
     best.batchLimit = integrated.batchLimit;
-    best.evals = integrated.evals;
+    best.evals = integrated.evals + 1;
     best.budget = budget - std::min(budget, initial);
+    if (best.budget > 0) --best.budget;
     SearchState current = best;
     for (int batch = 1; batch <= in.C; ++batch) {
         for (int bias = -5; bias <= 5; ++bias) {
-            Candidate variant = integrated.candidate;
-            variant.phaseAware = true;
-            variant.mixedRoutes = false;
-            variant.phaseBias = bias;
-            phaseTest(in, current, variant, batch);
+            for (bool global : {false, true}) {
+                if (options.phaseGlobal >= 0 &&
+                    global != (options.phaseGlobal == 1)) continue;
+                Candidate variant = integrated.candidate;
+                variant.phaseAware = true;
+                variant.mixedRoutes = false;
+                variant.phaseGlobal = global;
+                variant.phaseBias = bias;
+                phaseTest(in, current, variant, batch);
+            }
         }
     }
     if (betterIntegrated(current, best)) best = current;
@@ -1017,6 +1036,8 @@ inline Outcome solvePhaseBucket(const Instance& in, const Options& options) {
         }
         trial.candidate.phaseAware = true;
         trial.candidate.mixedRoutes = false;
+        if (options.phaseGlobal < 0 && rng() % 3 == 0)
+            trial.candidate.phaseGlobal = !trial.candidate.phaseGlobal;
         trial.candidate.phaseBias = std::clamp(
             trial.candidate.phaseBias + static_cast<int>(rng() % 3) - 1, -5, 5);
         trial.result = simulate(in, trial.candidate, trial.batchLimit, false);
@@ -1038,6 +1059,24 @@ inline Outcome solvePhaseBucket(const Instance& in, const Options& options) {
     outcome.evals = current.evals;
     outcome.strategy = "phase-bucket";
     return outcome;
+}
+
+inline Outcome solvePhaseBucket(const Instance& in, const Options& options) {
+    if (options.phaseGlobal < 0) {
+        Options first = options;
+        first.phaseGlobal = 0;
+        Options second = options;
+        second.phaseGlobal = 1;
+        Outcome a = solvePhaseBucketMode(in, first);
+        Outcome b = solvePhaseBucketMode(in, second);
+        if (b.result.feasible && (!a.result.feasible || b.result.mean < a.result.mean)) {
+            b.evals += a.evals;
+            return b;
+        }
+        a.evals += b.evals;
+        return a;
+    }
+    return solvePhaseBucketMode(in, options);
 }
 
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {

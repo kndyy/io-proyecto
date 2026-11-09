@@ -23,6 +23,7 @@ struct Config {
     std::uint64_t seed = 20261106;
     int maxEvals = 1000;
     int maxNeighbors = 40;
+    int phaseGlobal = -1;
     bool selfTest = false;
     bool listStrategies = false;
     bool help = false;
@@ -62,6 +63,10 @@ void loadSelector(const std::string& path, Config& config) {
         else if (key == "seed") config.seed = std::stoull(value);
         else if (key == "max_evals") config.maxEvals = std::stoi(value);
         else if (key == "max_neighbors") config.maxNeighbors = std::stoi(value);
+        else if (key == "phase_global") {
+            if (value == "auto") config.phaseGlobal = -1;
+            else config.phaseGlobal = std::stoi(value) == 0 ? 0 : 1;
+        }
     }
 }
 
@@ -72,9 +77,11 @@ Config parseArguments(int argc, char** argv) {
     bool hasSeed = false;
     bool hasMaxEvals = false;
     bool hasMaxNeighbors = false;
+    bool hasPhaseGlobal = false;
     std::uint64_t seed = 0;
     int maxEvals = 0;
     int maxNeighbors = 0;
+    int phaseGlobal = -1;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -91,6 +98,12 @@ Config parseArguments(int argc, char** argv) {
         else if (arg == "--seed") { seed = std::stoull(value()); hasSeed = true; }
         else if (arg == "--max-evals") { maxEvals = std::stoi(value()); hasMaxEvals = true; }
         else if (arg == "--max-neighbors") { maxNeighbors = std::stoi(value()); hasMaxNeighbors = true; }
+        else if (arg == "--phase-global") {
+            std::string v = value();
+            if (v == "auto") phaseGlobal = -1;
+            else phaseGlobal = std::stoi(v) == 0 ? 0 : 1;
+            hasPhaseGlobal = true;
+        }
         else if (arg == "--self-test") config.selfTest = true;
         else if (arg == "--list-strategies") config.listStrategies = true;
         else if (arg == "--help" || arg == "-h") config.help = true;
@@ -106,6 +119,7 @@ Config parseArguments(int argc, char** argv) {
     if (hasSeed) config.seed = seed;
     if (hasMaxEvals) config.maxEvals = maxEvals;
     if (hasMaxNeighbors) config.maxNeighbors = maxNeighbors;
+    if (hasPhaseGlobal) config.phaseGlobal = phaseGlobal;
     return config;
 }
 
@@ -315,7 +329,8 @@ void printUsage() {
     std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--txt <envio.txt>]\n"
               << "       [--from-txt <envio_previo.txt>] [--selector <archivo>]\n"
               << "       [--strategy <nombre>] [--seed <entero>] [--max-evals <entero>]\n"
-              << "       [--max-neighbors <entero>] [--self-test] [--list-strategies]\n";
+              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>]\n"
+              << "       [--self-test] [--list-strategies]\n";
 }
 
 int main(int argc, char** argv) {
@@ -352,7 +367,7 @@ int main(int argc, char** argv) {
         }
 
         Instance in = loadInstance(config.input);
-        Options options{config.seed, config.maxEvals, config.maxNeighbors};
+        Options options{config.seed, config.maxEvals, config.maxNeighbors, config.phaseGlobal};
         auto begin = std::chrono::steady_clock::now();
         Outcome outcome;
         if (!config.fromTxt.empty()) {
