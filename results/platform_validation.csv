@@ -1,0 +1,11 @@
+instance,objective_average,diagnostic,achieved_at_utc,public_best,gap_vs_public_pct,submission_file
+01,355.800000000,FEASIBLE,2026-11-09T16:54:09.650645+00:00,327.1137,8.770,proposed_submissions/instancia_01.txt
+02,450.364170000,FEASIBLE,2026-11-09T16:55:42.621522+00:00,412.6585,9.137,proposed_submissions/instancia_02.txt
+03,566.778260000,FEASIBLE,2026-11-09T16:56:04.430428+00:00,483.0249,17.339,proposed_submissions/instancia_03.txt
+04,591.550840000,FEASIBLE,2026-11-09T16:56:26.210226+00:00,528.4404,11.943,proposed_submissions/instancia_04.txt
+05,716.032350000,FEASIBLE,2026-11-09T16:56:48.043442+00:00,606.0450,18.148,proposed_submissions/instancia_05.txt
+06,998.935360000,FEASIBLE,2026-11-09T16:57:09.907028+00:00,760.2939,31.388,proposed_submissions/instancia_06.txt
+07,1207.751500000,FEASIBLE,2026-11-09T16:57:31.719389+00:00,905.6949,33.351,proposed_submissions/instancia_07.txt
+08,1426.502000000,FEASIBLE,2026-11-09T16:57:53.628581+00:00,1077.9824,32.331,proposed_submissions/instancia_08.txt
+09,1477.957300000,FEASIBLE,2026-11-09T16:58:15.486514+00:00,989.9936,49.290,proposed_submissions/instancia_09.txt
+10,1488.667500000,FEASIBLE,2026-11-09T16:58:37.462042+00:00,1001.9073,48.583,proposed_submissions/instancia_10.txt

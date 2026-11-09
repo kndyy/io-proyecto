@@ -19,10 +19,10 @@ g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
 El algoritmo se elige en tiempo de ejecución con `selector.conf`. Ese archivo no se compila ni forma parte del binario:
 
 ```ini
-strategy=vnd
-seed=20261106
-max_evals=1000
-max_neighbors=40
+strategy=integrated
+seed=20261109
+max_evals=50000
+max_neighbors=120
 ```
 
 También puede vivir fuera del repositorio:
@@ -53,8 +53,11 @@ Para cambiar de solución no hace falta recompilar.
 | `vnd-s0` | solo inicio `s0` | RELOCATE + SWAP |
 | `vnd-s1` | solo inicio `s1` | RELOCATE + SWAP |
 | `vnd-s2` | solo inicio `s2` | RELOCATE + SWAP |
+| `integrated` | greedy + ILS con VND `RELOCATE`, `SWAP` y `DISPATCH` | despacho AGV adaptativo |
 
-Cada estrategia con búsqueda local prueba `batch_limit=1` y `batch_limit=C`, elige el mejor inicio factible y conserva el mejor resultado global. La búsqueda usa first improvement, 40 vecinos por muestra y hasta 1000 simulaciones por inicio.
+`integrated` es la estrategia por defecto. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote. Las estrategias anteriores se conservan para comparación.
+
+Cada estrategia tipo `vnd` prueba `batch_limit=1` y `batch_limit=C`, elige el mejor inicio factible y conserva el mejor resultado global. La búsqueda usa first improvement, 40 vecinos por muestra y hasta 1000 simulaciones por inicio. `integrated` usa `seed=20261109`, `max_evals=50000` y `max_neighbors=120` por defecto.
 
 ## Helper externo
 
@@ -101,10 +104,31 @@ Los envíos generados están en `submissions/`:
 | `submissions/instancia_09.txt` | 1558.192027 | 30000 eval, 1000 vecinos, seed 42, warm start |
 | `submissions/instancia_10.txt` | 1549.173382 | 30000 eval, 1000 vecinos, seed 20261106, warm start |
 
+`submissions/` es el histórico del primer enfoque. Las soluciones mejoradas y validadas en la plataforma están en `proposed_submissions/` y en `results/platform_validation.csv`.
+
 `submissions/ejemplo_minimo.txt` reproduce el ejemplo canónico de un lote de la documentación. El ejemplo verificado de 1062 s no estaba incluido completo en los materiales recibidos.
 
 Cada envío se valida con `tools/validate_txt.py`, que comprueba cabecera, columnas, recursos canónicos, capacidades, posiciones, movimientos, buffers y precedencias, y recalcula la media desde las entregas en `f`. `tools/make_submissions.py` regenera los diez archivos y `submissions/manifest.csv`.
 
+
+## Validación oficial en IO1Lab
+
+Grupo `FED`. Los diez `proposed_submissions/` fueron subidos con Playwright y aceptados por la plataforma el 2026-11-09. El detalle está en `results/platform_validation.csv`.
+
+| Instancia | Valor aceptado | Mejor público | Gap |
+|---|---:|---:|---:|
+| 01 | 355.8000 | 327.1137 | +8.77% |
+| 02 | 450.3642 | 412.6585 | +9.14% |
+| 03 | 566.7783 | 483.0249 | +17.34% |
+| 04 | 591.5508 | 528.4404 | +11.94% |
+| 05 | 716.0324 | 606.0450 | +18.15% |
+| 06 | 998.9354 | 760.2939 | +31.39% |
+| 07 | 1207.7515 | 905.6949 | +33.35% |
+| 08 | 1426.5020 | 1077.9824 | +32.33% |
+| 09 | 1477.9573 | 989.9936 | +49.29% |
+| 10 | 1488.6675 | 1001.9073 | +48.58% |
+
+Estos valores son la mejor solución aceptada por instancia en la plataforma, no una prueba de optimalidad global. El histórico de intentos y el detalle del algoritmo integrado están en `ALGORITMO_INTEGRADO.md`, `results/integrated_comparison.csv` y `results/platform_validation.csv`.
 
 ## Diagnóstico de factibilidad
 
@@ -167,8 +191,10 @@ selector.conf     selector externo en tiempo de ejecución
 tools/            comparación, generación, validación y diagnóstico
 instances/        diez instancias oficiales
 materials/        paquete original recibido
-results/          resultados y selector recomendado
-submissions/      envíos TXT corregidos por instancia y ejemplo mínimo
+results/          resultados, comparativas y validación en plataforma
+submissions/      histórico de envíos TXT
+proposed_submissions/ soluciones integradas validadas en IO1Lab
 warmstart/        soluciones previas usadas solo como punto de partida
 diagnostics/      errores antes/después y resumen del diagnóstico
+ALGORITMO_INTEGRADO.md  descripción del método ILS + VND + AGV
 ```
