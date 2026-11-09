@@ -118,7 +118,7 @@ Grupo `FED`. Los diez `proposed_submissions/` fueron subidos con Playwright y ac
 
 | Instancia | Valor aceptado | Mejor público | Gap |
 |---|---:|---:|---:|
-| 01 | 355.8000 | 327.1137 | +8.77% |
+| 01 | 351.0000 | 327.1137 | +7.30% |
 | 02 | 450.3642 | 412.6585 | +9.14% |
 | 03 | 566.7783 | 483.0249 | +17.34% |
 | 04 | 591.5508 | 528.4404 | +11.94% |
@@ -133,7 +133,7 @@ Estos valores son la mejor solución aceptada por instancia en la plataforma, no
 
 ## Experimento ALNS con rutas mixtas
 
-`alns-joint` implementa la especificación de ALNS con rutas `I`, `O` y `M`, prioridades por lote y tres reinicios. Es correcto y todos sus TXT pasan el validador, pero no supera a `integrated` salvo en la instancia 01:
+`alns-joint` implementa la especificación de ALNS con rutas `I`, `O` y `M`, prioridades por lote y tres reinicios. Es correcto y todos sus TXT pasan el validador, pero no supera a `integrated` salvo en la instancia 01, donde su TXT de 351.0 fue aceptado y reemplazó al de 355.8:
 
 | Instancia | integrated | alns-joint 10k | alns-joint 50k |
 |---|---:|---:|---:|
