@@ -398,7 +398,8 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             std::vector<char> used(in.m, 0);
             used[seed.machine] = 1;
             long double sum = seed.score;
-            long double length = in.tau[agv.position][in.o];
+            long double length = in.tau[agv.position][in.o] +
+                                 in.tau[in.o][in.alpha[seed.machine]];
             while (static_cast<int>(route.inLots.size()) < in.C) {
                 int last = in.alpha[route.inMachines.back()];
                 int best = -1;
