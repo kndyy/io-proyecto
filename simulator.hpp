@@ -13,6 +13,8 @@ namespace io1 {
 
 struct Candidate {
     std::vector<std::vector<int>> sequence;
+    bool adaptive = false;
+    int bias = 0;
 };
 
 enum class LogType { Process, Pickup, Deliver, Move };
@@ -293,6 +295,51 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         return true;
     };
 
+    auto inputUrgency = [&](int k, int j) {
+        const auto& machine = machines[j];
+        if (machine.input >= 0 || machine.inputReserved ||
+            machine.nextFeed >= candidate.sequence[j].size()) {
+            return -std::numeric_limits<long double>::infinity();
+        }
+        if (machine.status == sim::Status::Blocked) {
+            return -std::numeric_limits<long double>::infinity();
+        }
+        long double travel = in.tau[agvs[k].position][in.o] +
+                             in.tau[in.o][in.alpha[j]];
+        long double ready = machine.status == sim::Status::Idle
+            ? now : result.processEnd[machine.current];
+        long double value = std::max(0.0L, now + travel - ready) - 0.10L * travel;
+        if (machine.status == sim::Status::Idle) {
+            int lot = candidate.sequence[j][machine.nextFeed];
+            value += 0.15L * in.duration(lot, j);
+        }
+        return value;
+    };
+
+    auto outputUrgency = [&](int k, int j) {
+        const auto& machine = machines[j];
+        if (machine.output < 0 || machine.outputReserved) {
+            return -std::numeric_limits<long double>::infinity();
+        }
+        long double travel = in.tau[agvs[k].position][in.beta[j]];
+        long double deadline = machine.status == sim::Status::Processing
+            ? result.processEnd[machine.current] : now;
+        long double scale = std::max(1.0L, in.tau[in.o][in.f] / 10.0L);
+        return std::max(0.0L, now + travel - deadline)
+            + 0.25L * (now - machine.outputSince) - 0.10L * travel
+            + candidate.bias * scale;
+    };
+
+    auto preferOutput = [&](int k) {
+        long double inScore = -std::numeric_limits<long double>::infinity();
+        long double outScore = -std::numeric_limits<long double>::infinity();
+        for (int j = 0; j < in.m; ++j) {
+            inScore = std::max(inScore, inputUrgency(k, j));
+            outScore = std::max(outScore, outputUrgency(k, j));
+        }
+        return outScore >= inScore;
+    };
+
     auto settle = [&]() {
         for (int j = 0; j < in.m; ++j) {
             if (machines[j].status == sim::Status::Idle && machines[j].input >= 0) {
@@ -301,8 +348,11 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         }
         for (int k = 0; k < in.K; ++k) {
             if (agvs[k].active) continue;
-            if (hasOutput()) createOutputRoute(k);
-            else if (hasInput()) createInputRoute(k);
+            bool out = hasOutput(), input = hasInput();
+            if (!out && !input) continue;
+            bool takeOut = out && (!input || !candidate.adaptive || preferOutput(k));
+            if (takeOut) createOutputRoute(k);
+            else createInputRoute(k);
         }
     };
 
