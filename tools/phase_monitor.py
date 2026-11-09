@@ -25,7 +25,12 @@ def run(binary, number, strategy, seed, evaluations, neighbors, directory):
                              capture_output=True, text=True)
     if checked.returncode != 0:
         raise RuntimeError(f"{name} {strategy}: {checked.stdout} {checked.stderr}")
-    return float(match.group(1)), float(match.group(2))
+    metrics = {}
+    for key in ("blocked_time", "idle_time", "empty_travel",
+                "loaded_travel", "phase_input_trips", "phase_output_trips"):
+        value = re.search(rf"{key}=([0-9.]+)", result.stdout)
+        metrics[key] = float(value.group(1)) if value else 0.0
+    return float(match.group(1)), float(match.group(2)), metrics
 
 
 def main():
@@ -51,6 +56,12 @@ def main():
                "integrated": scores["integrated"][0],
                "phase_bucket": scores["phase-bucket"][0],
                "phase_cpu_ms": scores["phase-bucket"][1],
+               "phase_blocked_time": scores["phase-bucket"][2]["blocked_time"],
+               "phase_idle_time": scores["phase-bucket"][2]["idle_time"],
+               "phase_empty_travel": scores["phase-bucket"][2]["empty_travel"],
+               "phase_loaded_travel": scores["phase-bucket"][2]["loaded_travel"],
+               "phase_input_trips": scores["phase-bucket"][2]["phase_input_trips"],
+               "phase_output_trips": scores["phase-bucket"][2]["phase_output_trips"],
                "gain_vs_integrated_pct":
                    100 * (scores["integrated"][0] - scores["phase-bucket"][0]) /
                    scores["integrated"][0],
