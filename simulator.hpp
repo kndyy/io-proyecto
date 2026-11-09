@@ -3,7 +3,9 @@
 #include "instance.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <queue>
 #include <string>
@@ -15,6 +17,9 @@ struct Candidate {
     std::vector<std::vector<int>> sequence;
     bool adaptive = false;
     int bias = 0;
+    std::vector<std::int8_t> priorityIn;
+    std::vector<std::int8_t> priorityOut;
+    bool mixedRoutes = false;
 };
 
 enum class LogType { Process, Pickup, Deliver, Move };
@@ -34,6 +39,8 @@ struct Result {
     std::vector<long double> processStart;
     std::vector<long double> processEnd;
     std::vector<LogEvent> log;
+    std::vector<long double> blockedByMachine;
+    std::array<int, 3> mixedRouteCounts{0, 0, 0};
     long double mean = std::numeric_limits<long double>::infinity();
     long double blockedTime = 0;
     int blockedCount = 0;
@@ -44,6 +51,7 @@ namespace sim {
 
 constexpr long double EPS = 1e-12L;
 constexpr long double RELEASE_GUARD = 1e-8L;
+constexpr long double MIXED_TRAVEL_WEIGHT = 0.35L;
 
 enum class Status { Idle, Processing, Blocked };
 enum class Action { PickIn, DropAlpha, PickBeta, DropFinal };
@@ -89,13 +97,25 @@ struct EventGreater {
     }
 };
 
+struct MixedRoute {
+    int type = 2;
+    std::vector<int> inMachines;
+    std::vector<int> inLots;
+    std::vector<int> outMachines;
+    std::vector<int> outLots;
+    long double score = -std::numeric_limits<long double>::infinity();
+    long double length = 0;
+};
+
 }
 
-inline Result simulate(const Instance& in, const Candidate& candidate, int batchLimit) {
+inline Result simulate(const Instance& in, const Candidate& candidate, int batchLimit,
+                       bool recordLog = true) {
     Result result;
     result.completion.assign(in.n, std::numeric_limits<long double>::infinity());
     result.processStart.assign(in.n, std::numeric_limits<long double>::infinity());
     result.processEnd.assign(in.n, std::numeric_limits<long double>::infinity());
+    result.blockedByMachine.assign(in.m, 0);
 
     std::vector<sim::Machine> machines(in.m);
     std::vector<sim::Agv> agvs(in.K);
@@ -121,7 +141,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         long double end = start + in.duration(lot, j);
         result.processStart[lot] = start;
         result.processEnd[lot] = end;
-        result.log.push_back({LogType::Process, j, lot, -1, -1, start});
+        if (recordLog) result.log.push_back({LogType::Process, j, lot, -1, -1, start});
         events.push({end, 0, j});
     };
 
@@ -218,7 +238,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.load.clear();
         agv.step = 0;
         agv.active = true;
-        if (agv.position != in.o) {
+        if (recordLog && agv.position != in.o) {
             result.log.push_back({LogType::Move, k, -1, agv.position, in.o, now});
         }
         events.push({now + in.tau[agv.position][in.o] + sim::RELEASE_GUARD, 1, k});
@@ -288,7 +308,255 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.step = 0;
         agv.active = true;
         int first = in.beta[chosen.front()];
-        if (agv.position != first) {
+        if (recordLog && agv.position != first) {
+            result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
+        }
+        events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
+        return true;
+    };
+
+
+    auto createMixedRoute = [&](int k) {
+        auto& agv = agvs[k];
+        const long double H = in.medianTau > 0 ? in.medianTau : 1.0L;
+        auto priorityIn = [&](int lot) {
+            return candidate.priorityIn.empty() ? 0.0L
+                : static_cast<long double>(candidate.priorityIn[lot]);
+        };
+        auto priorityOut = [&](int lot) {
+            return candidate.priorityOut.empty() ? 0.0L
+                : static_cast<long double>(candidate.priorityOut[lot]);
+        };
+        auto eligibleInput = [&](int j) {
+            return machines[j].input < 0 && !machines[j].inputReserved &&
+                   machines[j].nextFeed < candidate.sequence[j].size();
+        };
+        auto eligibleOutput = [&](int j) {
+            return machines[j].output >= 0 && !machines[j].outputReserved;
+        };
+        auto inputUrgency = [&](int j, int lot) {
+            auto& m = machines[j];
+            long double ready = m.status == sim::Status::Idle ? now
+                : m.status == sim::Status::Processing ? result.processEnd[m.current]
+                : now + H;
+            long double distance = in.tau[agv.position][in.o] + in.tau[in.o][in.alpha[j]];
+            long double value = (m.status == sim::Status::Idle ? 2 * H : 0)
+                + std::max(0.0L, now + distance - ready)
+                + 0.25L * H * priorityIn(lot) - 0.25L * distance;
+            return value;
+        };
+        auto outputUrgency = [&](int j, int lot) {
+            auto& m = machines[j];
+            long double end = m.status == sim::Status::Processing
+                ? result.processEnd[m.current] : now;
+            long double distance = in.tau[agv.position][in.beta[j]];
+            long double value = (m.status == sim::Status::Blocked ? 4 * H : 0)
+                + 1.5L * std::max(0.0L, now + distance - end)
+                + 0.25L * (now - m.outputSince)
+                + 0.25L * H * priorityOut(lot) - 0.25L * distance;
+            return value;
+        };
+
+        struct Seed { long double score; int machine; int lot; };
+        std::vector<Seed> inputSeeds;
+        std::vector<Seed> outputSeeds;
+        for (int j = 0; j < in.m; ++j) {
+            if (eligibleInput(j)) {
+                int lot = candidate.sequence[j][machines[j].nextFeed];
+                inputSeeds.push_back({inputUrgency(j, lot), j, lot});
+            }
+            if (eligibleOutput(j)) {
+                int lot = machines[j].output;
+                outputSeeds.push_back({outputUrgency(j, lot), j, lot});
+            }
+        }
+        auto seedLess = [&](const Seed& a, const Seed& b) {
+            if (a.score != b.score) return a.score > b.score;
+            if (in.lots[a.lot].id != in.lots[b.lot].id)
+                return in.lots[a.lot].id < in.lots[b.lot].id;
+            return a.machine < b.machine;
+        };
+        std::sort(inputSeeds.begin(), inputSeeds.end(), seedLess);
+        std::sort(outputSeeds.begin(), outputSeeds.end(), seedLess);
+        if (inputSeeds.size() > 5) inputSeeds.resize(5);
+        if (outputSeeds.size() > 5) outputSeeds.resize(5);
+
+        auto buildInputPhase = [&](const Seed& seed, sim::MixedRoute& route) {
+            route.type = 2;
+            route.inMachines = {seed.machine};
+            route.inLots = {seed.lot};
+            std::vector<char> used(in.m, 0);
+            used[seed.machine] = 1;
+            long double sum = seed.score;
+            long double length = in.tau[agv.position][in.o];
+            while (static_cast<int>(route.inLots.size()) < in.C) {
+                int last = in.alpha[route.inMachines.back()];
+                int best = -1;
+                int bestLot = -1;
+                long double bestValue = 0;
+                for (int j = 0; j < in.m; ++j) {
+                    if (used[j] || !eligibleInput(j)) continue;
+                    int lot = candidate.sequence[j][machines[j].nextFeed];
+                    long double extra = in.tau[last][in.alpha[j]];
+                    long double value = inputUrgency(j, lot) - sim::MIXED_TRAVEL_WEIGHT * extra;
+                    if (best < 0 || value > bestValue ||
+                        (value == bestValue && j < best)) {
+                        best = j;
+                        bestLot = lot;
+                        bestValue = value;
+                    }
+                }
+                if (best < 0 || bestValue <= 0) break;
+                used[best] = 1;
+                route.inMachines.push_back(best);
+                route.inLots.push_back(bestLot);
+                sum += inputUrgency(best, bestLot);
+                length += in.tau[last][in.alpha[best]];
+            }
+            route.length = length;
+            route.score = sum - sim::MIXED_TRAVEL_WEIGHT * length;
+        };
+
+        auto buildOutputPhase = [&](const Seed& seed, sim::MixedRoute& route) {
+            route.type = 1;
+            route.outMachines = {seed.machine};
+            route.outLots = {seed.lot};
+            std::vector<char> used(in.m, 0);
+            used[seed.machine] = 1;
+            long double sum = seed.score;
+            long double length = in.tau[agv.position][in.beta[seed.machine]];
+            while (static_cast<int>(route.outLots.size()) < in.C) {
+                int last = in.beta[route.outMachines.back()];
+                int best = -1;
+                int bestLot = -1;
+                long double bestValue = 0;
+                for (int j = 0; j < in.m; ++j) {
+                    if (used[j] || !eligibleOutput(j)) continue;
+                    int lot = machines[j].output;
+                    long double extra = in.tau[last][in.beta[j]];
+                    long double value = outputUrgency(j, lot) - sim::MIXED_TRAVEL_WEIGHT * extra;
+                    if (best < 0 || value > bestValue ||
+                        (value == bestValue && j < best)) {
+                        best = j;
+                        bestLot = lot;
+                        bestValue = value;
+                    }
+                }
+                if (best < 0 || bestValue <= 0) break;
+                used[best] = 1;
+                route.outMachines.push_back(best);
+                route.outLots.push_back(bestLot);
+                sum += outputUrgency(best, bestLot);
+                length += in.tau[last][in.beta[best]];
+            }
+            length += in.tau[in.beta[route.outMachines.back()]][in.f];
+            route.length = length;
+            route.score = sum - sim::MIXED_TRAVEL_WEIGHT * length;
+        };
+
+        auto buildMixedPhase = [&](const Seed& seed, sim::MixedRoute& route) {
+            buildInputPhase(seed, route);
+            std::vector<char> used(in.m, 0);
+            int lastLocation = in.alpha[route.inMachines.back()];
+            long double sum = route.score + sim::MIXED_TRAVEL_WEIGHT * route.length;
+            long double length = route.length;
+            while (static_cast<int>(route.outLots.size()) < in.C) {
+                int best = -1;
+                int bestLot = -1;
+                long double bestValue = 0;
+                for (int j = 0; j < in.m; ++j) {
+                    if (used[j] || !eligibleOutput(j)) continue;
+                    int lot = machines[j].output;
+                    long double extra = in.tau[lastLocation][in.beta[j]];
+                    long double value = outputUrgency(j, lot) - sim::MIXED_TRAVEL_WEIGHT * extra;
+                    if (best < 0 || value > bestValue ||
+                        (value == bestValue && j < best)) {
+                        best = j;
+                        bestLot = lot;
+                        bestValue = value;
+                    }
+                }
+                if (best < 0 || bestValue <= 0) break;
+                used[best] = 1;
+                route.outMachines.push_back(best);
+                route.outLots.push_back(bestLot);
+                sum += outputUrgency(best, bestLot);
+                length += in.tau[lastLocation][in.beta[best]];
+                lastLocation = in.beta[best];
+            }
+            if (route.outLots.empty()) {
+                route.score = -std::numeric_limits<long double>::infinity();
+                return;
+            }
+            length += in.tau[lastLocation][in.f];
+            route.type = 0;
+            route.length = length;
+            route.score = sum - sim::MIXED_TRAVEL_WEIGHT * length;
+        };
+
+        auto routeBetter = [&](const sim::MixedRoute& a, const sim::MixedRoute& b) {
+            if (a.score > b.score + sim::EPS) return true;
+            if (b.score > a.score + sim::EPS) return false;
+            int ta = static_cast<int>(a.inLots.size() + a.outLots.size());
+            int tb = static_cast<int>(b.inLots.size() + b.outLots.size());
+            if (ta != tb) return ta > tb;
+            if (a.length != b.length) return a.length < b.length;
+            if (a.type != b.type) return a.type < b.type;
+            if (a.inMachines != b.inMachines) return a.inMachines < b.inMachines;
+            if (a.inLots != b.inLots) return a.inLots < b.inLots;
+            if (a.outMachines != b.outMachines) return a.outMachines < b.outMachines;
+            return a.outLots < b.outLots;
+        };
+
+        std::vector<sim::MixedRoute> routes;
+        for (const Seed& seed : inputSeeds) {
+            sim::MixedRoute input;
+            buildInputPhase(seed, input);
+            routes.push_back(input);
+            sim::MixedRoute mixed;
+            buildMixedPhase(seed, mixed);
+            if (std::isfinite(mixed.score)) routes.push_back(mixed);
+        }
+        for (const Seed& seed : outputSeeds) {
+            sim::MixedRoute output;
+            buildOutputPhase(seed, output);
+            routes.push_back(output);
+        }
+        if (routes.empty()) return false;
+        sim::MixedRoute best = routes.front();
+        for (const auto& route : routes) {
+            if (routeBetter(route, best)) best = route;
+        }
+        ++result.mixedRouteCounts[best.type];
+
+        for (int j : best.inMachines) {
+            machines[j].inputReserved = true;
+            ++machines[j].nextFeed;
+        }
+        for (int j : best.outMachines) {
+            machines[j].outputReserved = true;
+        }
+        agv.route.clear();
+        if (!best.inLots.empty()) {
+            agv.route.push_back({in.o, sim::Action::PickIn, -1});
+            for (std::size_t i = 0; i < best.inLots.size(); ++i) {
+                agv.route.push_back({in.alpha[best.inMachines[i]], sim::Action::DropAlpha,
+                                     best.inLots[i]});
+            }
+        }
+        for (std::size_t i = 0; i < best.outLots.size(); ++i) {
+            agv.route.push_back({in.beta[best.outMachines[i]], sim::Action::PickBeta,
+                                 best.outLots[i]});
+        }
+        if (!best.outLots.empty()) {
+            agv.route.push_back({in.f, sim::Action::DropFinal, -1});
+        }
+        agv.incoming = best.inLots;
+        agv.load.clear();
+        agv.step = 0;
+        agv.active = true;
+        int first = agv.route.front().destination;
+        if (recordLog && agv.position != first) {
             result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
         }
         events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
@@ -348,6 +616,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         }
         for (int k = 0; k < in.K; ++k) {
             if (agvs[k].active) continue;
+            if (candidate.mixedRoutes) {
+                createMixedRoute(k);
+                continue;
+            }
             bool out = hasOutput(), input = hasInput();
             if (!out && !input) continue;
             bool takeOut = out && (!input || !candidate.adaptive || preferOutput(k));
@@ -360,8 +632,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         auto& agv = agvs[k];
         sim::Step step = agv.route[agv.step];
         if (step.action == sim::Action::PickIn) {
-            for (int lot : agv.incoming) {
-                result.log.push_back({LogType::Pickup, k, lot, in.o, -1, now});
+            if (recordLog) {
+                for (int lot : agv.incoming) {
+                    result.log.push_back({LogType::Pickup, k, lot, in.o, -1, now});
+                }
             }
             agv.load = agv.incoming;
             agv.incoming.clear();
@@ -370,7 +644,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             machines[j].input = step.lot;
             machines[j].inputReserved = false;
             agv.load.erase(std::find(agv.load.begin(), agv.load.end(), step.lot));
-            result.log.push_back({LogType::Deliver, k, step.lot, step.destination, -1, now});
+            if (recordLog) result.log.push_back({LogType::Deliver, k, step.lot, step.destination, -1, now});
         } else if (step.action == sim::Action::PickBeta) {
             int j = betaMachine[step.destination];
             auto& m = machines[j];
@@ -382,13 +656,14 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                 m.status = sim::Status::Idle;
                 m.outputSince = now;
                 result.blockedTime += now - m.blockStart;
+                result.blockedByMachine[j] += now - m.blockStart;
             }
             agv.load.push_back(step.lot);
-            result.log.push_back({LogType::Pickup, k, step.lot, step.destination, -1, now});
+            if (recordLog) result.log.push_back({LogType::Pickup, k, step.lot, step.destination, -1, now});
         } else {
             for (int lot : agv.load) {
                 result.completion[lot] = now;
-                result.log.push_back({LogType::Deliver, k, lot, in.f, -1, now});
+                if (recordLog) result.log.push_back({LogType::Deliver, k, lot, in.f, -1, now});
             }
             delivered += static_cast<int>(agv.load.size());
             agv.load.clear();
@@ -397,7 +672,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         ++agv.step;
         if (agv.step < agv.route.size()) {
             int destination = agv.route[agv.step].destination;
-            if (agv.position != destination) {
+            if (recordLog && agv.position != destination) {
                 result.log.push_back({LogType::Move, k, -1, agv.position, destination, now});
             }
             events.push({now + in.tau[agv.position][destination] + sim::RELEASE_GUARD, 1, k});

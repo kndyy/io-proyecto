@@ -13,7 +13,7 @@
 
 namespace io1 {
 
-enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated };
+enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint };
 
 struct Options {
     std::uint64_t seed = 20261106;
@@ -43,6 +43,7 @@ inline bool strategyFromName(const std::string& name, Strategy& strategy) {
     else if (name == "vnd-s1") strategy = Strategy::VndS1;
     else if (name == "vnd-s2") strategy = Strategy::VndS2;
     else if (name == "integrated") strategy = Strategy::Integrated;
+    else if (name == "alns-joint") strategy = Strategy::AlnsJoint;
     else return false;
     return true;
 }
@@ -60,6 +61,7 @@ inline std::string strategyName(Strategy strategy) {
         case Strategy::VndS1: return "vnd-s1";
         case Strategy::VndS2: return "vnd-s2";
         case Strategy::Integrated: return "integrated";
+        case Strategy::AlnsJoint: return "alns-joint";
     }
     return "vnd";
 }
@@ -265,13 +267,13 @@ struct SearchState {
 };
 
 inline bool tryRelocate(const Instance& in, SearchState& state, std::mt19937_64& rng,
-                        int maxNeighbors) {
+                        int maxNeighbors, bool recordLog = true) {
     auto moves = relocateMoves(in, state.candidate);
     shuffleVector(moves, rng);
     int count = std::min<int>(maxNeighbors, static_cast<int>(moves.size()));
     for (int i = 0; i < count && state.budget > 0; ++i) {
         Candidate next = applyMove(state.candidate, moves[i]);
-        Result result = simulate(in, next, state.batchLimit);
+        Result result = simulate(in, next, state.batchLimit, recordLog);
         --state.budget;
         ++state.evals;
         long double eps = 1e-9L * std::max(1.0L, std::fabs(state.result.mean));
@@ -286,13 +288,13 @@ inline bool tryRelocate(const Instance& in, SearchState& state, std::mt19937_64&
 }
 
 inline bool trySwap(const Instance& in, SearchState& state, std::mt19937_64& rng,
-                    int maxNeighbors) {
+                    int maxNeighbors, bool recordLog = true) {
     auto moves = swapMoves(in, state.candidate);
     shuffleVector(moves, rng);
     int count = std::min<int>(maxNeighbors, static_cast<int>(moves.size()));
     for (int i = 0; i < count && state.budget > 0; ++i) {
         Candidate next = applySwap(state.candidate, moves[i]);
-        Result result = simulate(in, next, state.batchLimit);
+        Result result = simulate(in, next, state.batchLimit, recordLog);
         --state.budget;
         ++state.evals;
         long double eps = 1e-9L * std::max(1.0L, std::fabs(state.result.mean));
@@ -489,10 +491,456 @@ inline Outcome solveIntegrated(const Instance& in, const Options& options) {
     return outcome;
 }
 
+
+struct AlnsState {
+    Candidate candidate;
+    Result result;
+};
+
+inline long double alnsRandom01(std::mt19937_64& rng) {
+    return static_cast<long double>(rng() >> 11) * (1.0L / 9007199254740992.0L);
+}
+
+inline Candidate makeMixedCandidate(const Instance& in, Candidate candidate) {
+    candidate.mixedRoutes = true;
+    candidate.priorityIn.assign(in.n, 0);
+    candidate.priorityOut.assign(in.n, 0);
+    return candidate;
+}
+
+inline std::vector<long double> lowerCompletion(const Instance& in) {
+    std::vector<long double> lower(in.n, std::numeric_limits<long double>::infinity());
+    for (int lot = 0; lot < in.n; ++lot) {
+        for (int j = 0; j < in.m; ++j) {
+            if (!in.compatible(lot, j)) continue;
+            long double value = in.tau[in.o][in.alpha[j]] + in.duration(lot, j)
+                + in.tau[in.beta[j]][in.f];
+            lower[lot] = std::min(lower[lot], value);
+        }
+    }
+    return lower;
+}
+
+inline std::vector<int> allLots(const Instance& in) {
+    std::vector<int> lots(in.n);
+    std::iota(lots.begin(), lots.end(), 0);
+    return lots;
+}
+
+inline std::vector<int> criticalPool(const Instance& in, const Result& result) {
+    std::vector<int> lots = allLots(in);
+    if (!result.feasible) return lots;
+    std::vector<long double> lower = lowerCompletion(in);
+    std::sort(lots.begin(), lots.end(), [&](int a, int b) {
+        long double da = result.completion[a] - lower[a];
+        long double db = result.completion[b] - lower[b];
+        if (da != db) return da > db;
+        return in.lots[a].id < in.lots[b].id;
+    });
+    std::size_t keep = std::max<std::size_t>(1, (in.n + 3) / 4);
+    if (lots.size() > keep) lots.resize(keep);
+    return lots;
+}
+
+inline void removeLots(Candidate& candidate, const std::vector<int>& lots) {
+    for (int lot : lots) {
+        for (int j = 0; j < static_cast<int>(candidate.sequence.size()); ++j) {
+            auto& sequence = candidate.sequence[j];
+            auto it = std::find(sequence.begin(), sequence.end(), lot);
+            if (it != sequence.end()) {
+                sequence.erase(it);
+                break;
+            }
+        }
+    }
+}
+
+inline std::vector<long double> sequenceLoads(const Instance& in, const Candidate& candidate) {
+    std::vector<long double> loads(in.m, 0);
+    for (int j = 0; j < in.m; ++j) {
+        for (int lot : candidate.sequence[j]) loads[j] += in.duration(lot, j);
+    }
+    return loads;
+}
+
+inline std::vector<int> insertionPositions(const Instance& in, const Candidate& candidate,
+                                           int lot, int machine) {
+    int length = static_cast<int>(candidate.sequence[machine].size());
+    std::vector<int> positions{0, length / 4, length / 2, (3 * length) / 4, length};
+    int spt = length;
+    long double duration = in.duration(lot, machine);
+    for (int h = 0; h < length; ++h) {
+        if (duration <= in.duration(candidate.sequence[machine][h], machine)) {
+            spt = h;
+            break;
+        }
+    }
+    for (int delta = -1; delta <= 1; ++delta) {
+        int position = spt + delta;
+        if (position >= 0 && position <= length) positions.push_back(position);
+    }
+    std::sort(positions.begin(), positions.end());
+    positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
+    return positions;
+}
+
+inline long double proxyScore(const Instance& in, const Candidate& candidate,
+                              const std::vector<long double>& loads, long double meanLoad,
+                              int lot, int machine, int position) {
+    long double prefix = 0;
+    for (int h = 0; h < position; ++h) {
+        prefix += in.duration(candidate.sequence[machine][h], machine);
+    }
+    long double duration = in.duration(lot, machine);
+    int length = static_cast<int>(candidate.sequence[machine].size());
+    return prefix + duration + in.tau[in.o][in.alpha[machine]]
+         + in.tau[in.beta[machine]][in.f] + duration * (length - position)
+         + 0.5L * std::max(0.0L, loads[machine] + duration - meanLoad);
+}
+
+struct InsertionOption {
+    int lot = -1;
+    int machine = -1;
+    int position = -1;
+    long double score = std::numeric_limits<long double>::infinity();
+};
+
+inline void insertOption(Candidate& candidate, const Instance& in,
+                         const InsertionOption& option, std::vector<long double>& loads,
+                         long double& sumLoad) {
+    candidate.sequence[option.machine].insert(
+        candidate.sequence[option.machine].begin() + option.position, option.lot);
+    long double duration = in.duration(option.lot, option.machine);
+    loads[option.machine] += duration;
+    sumLoad += duration;
+}
+
+inline void repairCheapest(const Instance& in, Candidate& candidate,
+                           std::vector<int> remaining) {
+    std::vector<long double> loads = sequenceLoads(in, candidate);
+    long double sumLoad = std::accumulate(loads.begin(), loads.end(), 0.0L);
+    while (!remaining.empty()) {
+        long double meanLoad = sumLoad / in.m;
+        InsertionOption best;
+        for (int lot : remaining) {
+            for (int j = 0; j < in.m; ++j) {
+                if (!in.compatible(lot, j)) continue;
+                for (int position : insertionPositions(in, candidate, lot, j)) {
+                    long double score = proxyScore(in, candidate, loads, meanLoad,
+                                                   lot, j, position);
+                    bool better = score < best.score
+                        || (score == best.score && in.lots[lot].id < in.lots[best.lot].id)
+                        || (score == best.score && in.lots[lot].id == in.lots[best.lot].id
+                            && j < best.machine)
+                        || (score == best.score && in.lots[lot].id == in.lots[best.lot].id
+                            && j == best.machine && position < best.position);
+                    if (best.lot < 0 || better) best = {lot, j, position, score};
+                }
+            }
+        }
+        insertOption(candidate, in, best, loads, sumLoad);
+        remaining.erase(std::find(remaining.begin(), remaining.end(), best.lot));
+    }
+}
+
+inline void repairRegret(const Instance& in, Candidate& candidate,
+                         std::vector<int> remaining) {
+    const long double H = in.medianTau > 0 ? in.medianTau : 1.0L;
+    std::vector<long double> loads = sequenceLoads(in, candidate);
+    long double sumLoad = std::accumulate(loads.begin(), loads.end(), 0.0L);
+    while (!remaining.empty()) {
+        long double meanLoad = sumLoad / in.m;
+        int chosenLot = -1;
+        InsertionOption chosen;
+        long double chosenRegret = -std::numeric_limits<long double>::infinity();
+        for (int lot : remaining) {
+            long double first = std::numeric_limits<long double>::infinity();
+            long double second = std::numeric_limits<long double>::infinity();
+            InsertionOption best;
+            for (int j = 0; j < in.m; ++j) {
+                if (!in.compatible(lot, j)) continue;
+                for (int position : insertionPositions(in, candidate, lot, j)) {
+                    long double score = proxyScore(in, candidate, loads, meanLoad,
+                                                   lot, j, position);
+                    if (score < first) {
+                        second = first;
+                        first = score;
+                        best = {lot, j, position, score};
+                    } else if (score < second) {
+                        second = score;
+                    }
+                }
+            }
+            if (!std::isfinite(first)) continue;
+            if (!std::isfinite(second)) second = first + H;
+            long double regret = second - first;
+            bool better = chosenLot < 0 || regret > chosenRegret
+                || (regret == chosenRegret && first < chosen.score)
+                || (regret == chosenRegret && first == chosen.score
+                    && in.lots[lot].id < in.lots[chosenLot].id);
+            if (better) {
+                chosenLot = lot;
+                chosenRegret = regret;
+                chosen = best;
+            }
+        }
+        insertOption(candidate, in, chosen, loads, sumLoad);
+        remaining.erase(std::find(remaining.begin(), remaining.end(), chosenLot));
+    }
+}
+
+inline std::vector<int> pickRandomLots(const Instance& in, int count,
+                                       std::mt19937_64& rng) {
+    std::vector<int> lots = allLots(in);
+    shuffleVector(lots, rng);
+    if (static_cast<int>(lots.size()) > count) lots.resize(count);
+    return lots;
+}
+
+inline std::vector<int> pickFromPool(const Instance& in, const std::vector<int>& pool,
+                                     int count, std::mt19937_64& rng) {
+    std::vector<int> selected = pool;
+    shuffleVector(selected, rng);
+    if (static_cast<int>(selected.size()) > count) selected.resize(count);
+    if (static_cast<int>(selected.size()) < count) {
+        std::vector<int> rest = allLots(in);
+        shuffleVector(rest, rng);
+        for (int lot : rest) {
+            if (static_cast<int>(selected.size()) >= count) break;
+            if (std::find(selected.begin(), selected.end(), lot) == selected.end()) {
+                selected.push_back(lot);
+            }
+        }
+    }
+    return selected;
+}
+
+inline std::vector<int> pickBlockedLots(const Instance& in, const Candidate& candidate,
+                                        const Result& result, int count,
+                                        std::mt19937_64& rng) {
+    int machine = 0;
+    long double worst = -1;
+    for (int j = 0; j < in.m; ++j) {
+        long double blocked = result.blockedByMachine.empty() ? 0 : result.blockedByMachine[j];
+        if (blocked > worst) {
+            worst = blocked;
+            machine = j;
+        }
+    }
+    if (worst <= 0) {
+        return pickFromPool(in, criticalPool(in, result), count, rng);
+    }
+    std::vector<int> selected = candidate.sequence[machine];
+    shuffleVector(selected, rng);
+    if (static_cast<int>(selected.size()) > count) selected.resize(count);
+    if (static_cast<int>(selected.size()) < count) {
+        std::vector<int> rest = allLots(in);
+        shuffleVector(rest, rng);
+        for (int lot : rest) {
+            if (static_cast<int>(selected.size()) >= count) break;
+            if (std::find(selected.begin(), selected.end(), lot) == selected.end()) {
+                selected.push_back(lot);
+            }
+        }
+    }
+    return selected;
+}
+
+inline Candidate destroyRepair(const Instance& in, const Candidate& current,
+                               const Result& result, int op, std::mt19937_64& rng,
+                               int& d4Count) {
+    Candidate trial = current;
+    int count = std::max(2, (12 * in.n + 99) / 100);
+    std::vector<int> critical = criticalPool(in, result);
+    if (op == 3) {
+        ++d4Count;
+        std::vector<int> selected = pickFromPool(in, critical, count, rng);
+        std::vector<int> modified;
+        for (int lot : selected) {
+            int deltaIn = (rng() % 2) == 0 ? 2 : -2;
+            int deltaOut = (rng() % 2) == 0 ? 2 : -2;
+            trial.priorityIn[lot] = static_cast<std::int8_t>(std::clamp(
+                static_cast<int>(trial.priorityIn[lot]) + deltaIn, -8, 8));
+            trial.priorityOut[lot] = static_cast<std::int8_t>(std::clamp(
+                static_cast<int>(trial.priorityOut[lot]) + deltaOut, -8, 8));
+            modified.push_back(lot);
+        }
+        if (d4Count % 5 == 0) {
+            for (std::size_t i = 0; i < modified.size(); i += 4) {
+                trial.priorityIn[modified[i]] = 0;
+                trial.priorityOut[modified[i]] = 0;
+            }
+        }
+        return trial;
+    }
+    std::vector<int> removed;
+    if (op == 0) removed = pickRandomLots(in, count, rng);
+    else if (op == 1) removed = pickFromPool(in, critical, count, rng);
+    else removed = pickBlockedLots(in, current, result, count, rng);
+    removeLots(trial, removed);
+    if (op == 0) repairCheapest(in, trial, removed);
+    else repairRegret(in, trial, removed);
+    return trial;
+}
+
+inline bool betterAlns(const Result& a, const Result& b) {
+    return a.feasible && (!b.feasible || a.mean < b.mean - 1e-9L);
+}
+
+inline long long intensifyMixed(const Instance& in, AlnsState& state, long long limit,
+                                const Options& options, std::mt19937_64& rng) {
+    SearchState local;
+    local.candidate = state.candidate;
+    local.result = state.result;
+    local.batchLimit = in.C;
+    local.budget = limit;
+    local.evals = 0;
+    int neighborhood = 1;
+    while (local.budget > 0 && neighborhood <= 2) {
+        bool improved = neighborhood == 1
+            ? tryRelocate(in, local, rng, options.maxNeighbors, false)
+            : trySwap(in, local, rng, options.maxNeighbors, false);
+        neighborhood = improved ? 1 : neighborhood + 1;
+    }
+    if (betterAlns(local.result, state.result)) {
+        state.candidate = local.candidate;
+        state.result = local.result;
+    }
+    return local.evals;
+}
+
+inline int weightedPick(const std::vector<long double>& weights, std::mt19937_64& rng) {
+    long double total = std::accumulate(weights.begin(), weights.end(), 0.0L);
+    if (total <= 0) return static_cast<int>(rng() % weights.size());
+    long double value = alnsRandom01(rng) * total;
+    for (std::size_t i = 0; i < weights.size(); ++i) {
+        if (value < weights[i]) return static_cast<int>(i);
+        value -= weights[i];
+    }
+    return static_cast<int>(weights.size() - 1);
+}
+
+inline Outcome solveAlnsJoint(const Instance& in, const Options& options) {
+    long long E = std::max<long long>(1, options.maxEvals);
+    long long e0 = std::max<long long>(1, E / 10);
+    Outcome integrated = solveIntegrated(in, Options{options.seed,
+        static_cast<int>(std::min<long long>(e0, std::numeric_limits<int>::max())),
+        options.maxNeighbors});
+    long long spent = integrated.evals;
+    AlnsState initial;
+    bool haveInitial = false;
+    auto consider = [&](Candidate candidate) {
+        candidate = makeMixedCandidate(in, std::move(candidate));
+        Result result = simulate(in, candidate, in.C, false);
+        ++spent;
+        if (result.feasible && (!haveInitial || result.mean < initial.result.mean)) {
+            initial = {std::move(candidate), std::move(result)};
+            haveInitial = true;
+        }
+    };
+    consider(integrated.candidate);
+    consider(buildOrdered(in, orderByHeight(in), Assign::Score));
+    consider(buildOrdered(in, orderByFastest(in), Assign::Score));
+    std::mt19937_64 startRng(options.seed);
+    consider(buildRandomized(in, startRng));
+    if (!haveInitial) {
+        integrated.strategy = "alns-joint";
+        return integrated;
+    }
+
+    AlnsState bestGlobal = initial;
+    long long remaining = std::max(0LL, E - spent);
+    long long budget0 = remaining / 3;
+    long long budget1 = remaining / 3;
+    long long budget2 = remaining - budget0 - budget1;
+    long long budgets[3] = {budget0, budget1, budget2};
+    std::uint64_t seed0 = options.seed;
+    std::uint64_t seed1 = seed0 ^ 0x9E3779B97F4A7C15ULL;
+    std::uint64_t seed2 = seed0 ^ 0xD1B54A32D192ED03ULL;
+    std::uint64_t seeds[3] = {seed0, seed1, seed2};
+    long double F0 = std::isfinite(initial.result.mean) ? initial.result.mean : 1;
+    long double T0 = -0.02L * F0 / std::log(0.5L);
+    long double Tmin = 0.0002L * F0;
+    long long lastIntensify = spent;
+
+    for (int run = 0; run < 3; ++run) {
+        AlnsState current = initial;
+        AlnsState bestRun = initial;
+        std::vector<long double> weights(4, 1.0L);
+        std::vector<long long> usage(4, 0);
+        std::vector<long long> reward(4, 0);
+        std::mt19937_64 rng(seeds[run]);
+        long long runSpent = 0;
+        int attempts = 0;
+        int d4Count = 0;
+        while (runSpent < budgets[run] && spent < E) {
+            int op = weightedPick(weights, rng);
+            ++usage[op];
+            Candidate trial = destroyRepair(in, current.candidate, current.result,
+                                            op, rng, d4Count);
+            Result trialResult = simulate(in, trial, in.C, false);
+            ++runSpent;
+            ++spent;
+            ++attempts;
+            bool improvesCurrent = betterAlns(trialResult, current.result);
+            bool improvesBest = betterAlns(trialResult, bestGlobal.result);
+            bool accepted = false;
+            if (trialResult.feasible) {
+                long double ratio = static_cast<long double>(spent) / E;
+                long double temperature = T0 * std::pow(Tmin / T0, ratio);
+                bool accept = improvesCurrent || trialResult.mean <= current.result.mean
+                    || alnsRandom01(rng) < std::exp(-(trialResult.mean - current.result.mean)
+                                                    / temperature);
+                if (accept) {
+                    current = {trial, trialResult};
+                    accepted = true;
+                }
+                if (improvesBest) bestGlobal = {trial, trialResult};
+                if (betterAlns(trialResult, bestRun.result)) bestRun = {trial, trialResult};
+            }
+            if (improvesBest) reward[op] += 5;
+            else if (improvesCurrent) reward[op] += 2;
+            else if (accepted) reward[op] += 1;
+            if (attempts % 50 == 0) {
+                for (int g = 0; g < 4; ++g) {
+                    long double rate = static_cast<long double>(reward[g]) /
+                                       std::max<long long>(1, usage[g]);
+                    weights[g] = 0.8L * weights[g] + 0.2L * std::max(0.1L, rate);
+                    usage[g] = 0;
+                    reward[g] = 0;
+                }
+            }
+            if (improvesBest || spent - lastIntensify >= 2500) {
+                long long limit = std::min(250LL,
+                    std::min(budgets[run] - runSpent, E - spent));
+                if (limit > 0) {
+                    long long used = intensifyMixed(in, current, limit, options, rng);
+                    runSpent += used;
+                    spent += used;
+                    if (betterAlns(current.result, bestRun.result)) bestRun = current;
+                    if (betterAlns(current.result, bestGlobal.result)) bestGlobal = current;
+                    lastIntensify = spent;
+                }
+            }
+        }
+        if (betterAlns(bestRun.result, bestGlobal.result)) bestGlobal = bestRun;
+    }
+
+    Result final = simulate(in, bestGlobal.candidate, in.C, true);
+    Outcome outcome;
+    outcome.candidate = bestGlobal.candidate;
+    outcome.result = final;
+    outcome.batchLimit = in.C;
+    outcome.evals = spent;
+    outcome.strategy = "alns-joint";
+    return outcome;
+}
+
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {
     Outcome outcome;
     outcome.strategy = strategyName(strategy);
     if (strategy == Strategy::Integrated) return solveIntegrated(in, options);
+    if (strategy == Strategy::AlnsJoint) return solveAlnsJoint(in, options);
 
     if (strategy == Strategy::B1 || strategy == Strategy::B2 || strategy == Strategy::B3) {
         std::vector<int> order = strategy == Strategy::B2 ? orderByFastest(in) : orderById(in);

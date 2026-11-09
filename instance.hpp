@@ -30,6 +30,7 @@ struct Instance {
     int o = -1;
     int f = -1;
     int locations = 0;
+    long double medianTau = 1;
 
     bool compatible(int lot, int machine) const {
         return speed[lot][machine] > 0;
@@ -113,6 +114,19 @@ inline Instance loadInstance(const std::string& path) {
         for (int j = 0; j < data.locations; ++j) {
             in >> data.tau[i][j];
         }
+    }
+    std::vector<long double> positive;
+    for (const auto& row : data.tau) {
+        for (long double value : row) {
+            if (value > 0) positive.push_back(value);
+        }
+    }
+    if (!positive.empty()) {
+        std::sort(positive.begin(), positive.end());
+        std::size_t middle = positive.size() / 2;
+        data.medianTau = positive.size() % 2 == 0
+            ? (positive[middle - 1] + positive[middle]) / 2
+            : positive[middle];
     }
     return data;
 }
