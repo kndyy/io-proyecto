@@ -55,6 +55,7 @@ Para cambiar de solución no hace falta recompilar.
 | `vnd-s2` | solo inicio `s2` | RELOCATE + SWAP |
 | `integrated` | greedy + ILS con VND `RELOCATE`, `SWAP` y `DISPATCH` | despacho AGV adaptativo |
 | `alns-joint` | ALNS con destrucción/reparación, prioridades por lote y rutas AGV mixtas | experimental |
+| `phase-bucket` | ILS + despacho de AGVs guiado por fase y viajes de longitud adaptativa | experimental, comparador |
 
 `integrated` es la estrategia por defecto. `alns-joint` está implementada y validada, pero no se selecciona porque solo mejora a `integrated` en la instancia 01. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote. Las estrategias anteriores se conservan para comparación.
 
@@ -212,3 +213,25 @@ diagnostics/      errores antes/después y resumen del diagnóstico
 ALGORITMO_INTEGRADO.md  descripción del método ILS + VND + AGV
 ALGORITMO_ALNS_RUTAS_MIXTAS.md  método ALNS experimental y diagnóstico
 ```
+
+## Estrategia phase-bucket (experimental)
+
+Basada en el enfoque de asignación de tareas por fases de producción y agrupación (*bucketing*) de Bergmann, Kovács y Váncza (2026), adaptado al objetivo específico de minimizar la media de finalización de lotes y a buffers de capacidad unitaria.
+
+La política construye rutas separadas de abastecimiento y retiro: **no usa rutas mixtas**. Cada AGV libre considera semillas para ambas fases, evalúa prefijos de ruta con 1 a C lotes y selecciona la ruta con mejor relación entre urgencia productiva y desplazamiento. La evaluación de salida penaliza bloqueos y demoras de lotes; la de entrada penaliza máquinas desabastecidas. El bucle ILS conserva la mejor solución factible y adapta el sesgo de fases, el tamaño de lote y las secuencias de máquinas.
+
+La salida oficial se genera únicamente al finalizar, y la optimización mantiene el estado en memoria. No reemplazar TXT aceptados hasta verificar que las nuevas medias mejoran en IO1Lab.
+
+Prueba local:
+
+```sh
+g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
+./io1 --input instances/instancia_09.io1 --strategy phase-bucket --seed 20261109 --max-evals 50000 --max-neighbors 120 --txt /tmp/phase09.txt
+python3 tools/validate_txt.py instances/instancia_09.io1 /tmp/phase09.txt
+python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed 20261109 --out monitor_output
+```
+
+Los workflows `.github/workflows/phase-monitor.yml` y `.github/workflows/phase-deep.yml` compilan, ejecutan los self-tests, comparan las diez instancias y guardan CSV/TXT en artefactos temporales de Actions. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` sigue siendo `integrated` hasta validar el nuevo método en el evaluador oficial.
+
+Referencia: Júlia Bergmann, András Kovács y József Váncza, “AGV scheduling in shopfloor logistics of semiconductor assembly”, *Journal of Manufacturing Systems*, 87 (2026), 27–47, DOI: 10.1016/j.jmsy.2026.05.004. La función de prioridad, las vecindades y el bloqueo son adaptaciones del proyecto, no una reproducción exacta del algoritmo del artículo.
+
