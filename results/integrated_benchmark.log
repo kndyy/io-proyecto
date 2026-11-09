@@ -1,0 +1,10 @@
+RESULT instance=instancia_01 strategy=integrated batch_limit=2 feasible=1 mean=357.924675 evals=10000 cpu_ms=115.716876
+RESULT instance=instancia_02 strategy=integrated batch_limit=2 feasible=1 mean=469.225244 evals=10000 cpu_ms=206.687813
+RESULT instance=instancia_03 strategy=integrated batch_limit=2 feasible=1 mean=591.473502 evals=10000 cpu_ms=309.711741
+RESULT instance=instancia_04 strategy=integrated batch_limit=2 feasible=1 mean=605.760318 evals=10000 cpu_ms=520.781957
+RESULT instance=instancia_05 strategy=integrated batch_limit=3 feasible=1 mean=744.647520 evals=10000 cpu_ms=650.822780
+RESULT instance=instancia_06 strategy=integrated batch_limit=2 feasible=1 mean=1023.575325 evals=10000 cpu_ms=902.928761
+RESULT instance=instancia_07 strategy=integrated batch_limit=2 feasible=1 mean=1207.751422 evals=10000 cpu_ms=1220.189179
+RESULT instance=instancia_08 strategy=integrated batch_limit=2 feasible=1 mean=1459.347503 evals=10000 cpu_ms=1686.271912
+RESULT instance=instancia_09 strategy=integrated batch_limit=3 feasible=1 mean=1505.533127 evals=10000 cpu_ms=1876.615818
+RESULT instance=instancia_10 strategy=integrated batch_limit=3 feasible=1 mean=1488.667489 evals=10000 cpu_ms=2246.425967
