@@ -19,14 +19,14 @@ La fórmula de urgencia de salida estima bloqueo y espera en buffer; la de entra
 ```sh
 g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
 ./io1 --self-test
-./io1 --input instances/instancia_01.io1 --strategy integrated --seed 20261109 --max-evals 30000 --max-neighbors 120 --txt out.txt
+./io1 --input instances/instancia_01.io1 --strategy integrated --seed 20261109 --max-evals 50000 --max-neighbors 120 --txt out.txt
 python3 tools/validate_txt.py instances/instancia_01.io1 out.txt
 ```
 
 **No se usa ningún TXT como entrada de la optimización integrada**: los estados y simulaciones viven en memoria y el TXT se exporta una sola vez al final. `selector.conf` configura la estrategia por defecto. Las otras estrategias se mantienen para comparación.
 
 ## Verificaciones
-La compilación C++20, self-test y validación de los diez casos se ejecutaron desde el workflow de esta rama. Los números experimentales y el presupuesto están en `results/integrated_benchmark.log`. Los resultados aceptados previamente del proyecto permanecen en `submissions/` y no deben reemplazarse si el nuevo resultado es peor.
+La compilación C++20, self-test y validación de los diez casos se ejecutaron desde el workflow de esta rama. Los dos presupuestos comparados y la selección por instancia están en `results/integrated_comparison.csv`. Los diez TXT propuestos y validados están en `proposed_submissions/`. Los resultados aceptados previamente del proyecto permanecen en `submissions/` y no deben reemplazarse si el nuevo resultado es peor.
 
 ## Alcance
 Es una metaheurística, no un optimizador exacto; «mejor público» es una referencia de ranking, no una prueba de optimalidad global. Se requiere declarar con precisión el uso de IA en `declaracion_IA.tex`, como exige el proyecto.
