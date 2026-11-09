@@ -231,7 +231,7 @@ python3 tools/validate_txt.py instances/instancia_09.io1 /tmp/phase09.txt
 python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed 20261109 --out monitor_output
 ```
 
-Los workflows `.github/workflows/phase-monitor.yml` y `.github/workflows/phase-deep.yml` compilan, ejecutan los self-tests, comparan las diez instancias y guardan CSV/TXT en artefactos temporales de Actions. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` sigue siendo `integrated` hasta validar el nuevo método en el evaluador oficial.
+El workflow `.github/workflows/phase-monitor.yml` compila, ejecuta los self-tests, compara las diez instancias y guarda CSV/TXT en artefactos temporales de Actions; la corrida diaria es corta y las actualizaciones del código ejecutan una comparación de 50 000 evaluaciones por instancia. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` sigue siendo `integrated` hasta validar el nuevo método en el evaluador oficial.
 
 Referencia: Júlia Bergmann, András Kovács y József Váncza, “AGV scheduling in shopfloor logistics of semiconductor assembly”, *Journal of Manufacturing Systems*, 87 (2026), 27–47, DOI: 10.1016/j.jmsy.2026.05.004. La función de prioridad, las vecindades y el bloqueo son adaptaciones del proyecto, no una reproducción exacta del algoritmo del artículo.
 
