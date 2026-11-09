@@ -31,7 +31,7 @@ jobs:
         run: python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed ${{ github.run_number }} --out monitor_output
       - name: Deeper benchmark on code updates
         if: github.event_name == 'push'
-        run: python3 tools/phase_monitor.py --evals 20000 --neighbors 80 --seed 20261109 --out monitor_deep
+        run: python3 tools/phase_monitor.py --evals 50000 --neighbors 120 --seed 20261109 --out monitor_deep
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -40,4 +40,5 @@ jobs:
             monitor_output/summary.csv
             monitor_pilot/summary.csv
             monitor_deep/summary.csv
+            monitor_deep/*_phase-bucket.txt
           retention-days: 30
