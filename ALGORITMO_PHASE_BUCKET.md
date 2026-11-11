@@ -51,6 +51,12 @@ El score normalizado de la ruta es:
 
 Los coeficientes son parámetros heurísticos fijos de la implementación, no parámetros físicos ni resultados estimados por un paper. El sesgo b y el límite de carga se comparan mediante **simulaciones reales**; la función objetivo que determina la aceptación continúa siendo la media exacta de entregas, nunca el score aproximado.
 
+### Lookahead de salida
+
+Con `phase_lookahead=1` se permite una semilla de salida futura cuando no hay tareas actuales: la máquina está procesando, `β` está libre y el lote actual aún no terminó. El AGV reserva esa salida, espera en su posición si hace falta y programa el viaje para llegar a `β` cuando termina el proceso. La extensión de la ruta solo usa salidas ya presentes; no se encadenan varias esperas futuras.
+
+El lookahead ayuda en 01, 02, 04, 06, 07 y 08, pero perjudica en 03, 05, 09 y 10. Por eso la configuración final es por instancia y `phase_lookahead=0` queda como valor por defecto.
+
 ## Búsqueda y diversificación
 
 - Inicialización: `integrated` con un tercio de las evaluaciones.
@@ -79,18 +85,18 @@ En la prueba reproducible de 50 000 evaluaciones con semilla 20261109 se superar
 
 | Instancia | Referencia inicial | Phase-bucket final | Configuración |
 |---|---:|---:|---|
-| 01 | 351.0000 | 346.2273 | auto 50k |
-| 02 | 450.3642 | 441.5838 | id 50k |
-| 03 | 566.7783 | 525.0072 | global 50k |
-| 04 | 591.5508 | 572.0348 | global 50k |
+| 01 | 351.0000 | 337.4091 | auto 50k, lookahead |
+| 02 | 450.3642 | 438.2044 | auto 50k, lookahead |
+| 03 | 566.7783 | 520.8947 | auto 50k, seed 55555 |
+| 04 | 591.5508 | 565.9533 | auto 50k, lookahead |
 | 05 | 716.0324 | 654.5154 | id 50k |
-| 06 | 998.9354 | 903.3088 | global 50k |
-| 07 | 1207.7515 | 1091.3296 | global 100k |
-| 08 | 1426.5020 | 1295.6499 | id 50k |
-| 09 | 1477.9573 | 1294.2657 | global 50k |
-| 10 | 1488.6675 | 1308.1711 | id 100k |
+| 06 | 998.9354 | 902.4970 | auto 50k, lookahead |
+| 07 | 1207.7515 | 1073.4233 | auto 50k, lookahead |
+| 08 | 1426.5020 | 1294.2152 | auto 50k, lookahead |
+| 09 | 1477.9573 | 1273.7104 | global 500k |
+| 10 | 1488.6675 | 1300.1083 | auto 50k, seed 12345 |
 
-El benchmark inicial de 50k está en [GitHub Actions — monitor 50k](https://github.com/kndyy/io-proyecto/actions/runs/42674605687). Después se probaron los dos modos de asignación y presupuestos de 100k para las instancias con mayor brecha. Los diez TXT finales fueron enviados con Playwright y aceptados por IO1Lab; los valores oficiales y la configuración por instancia están en `results/platform_validation.csv`.
+El benchmark inicial de 50k está en [GitHub Actions — monitor 50k](https://github.com/kndyy/io-proyecto/actions/runs/42674605687). Después se probaron los dos modos de asignación, lookahead, semillas alternativas y presupuestos de 100k/500k donde aportaban. Los diez TXT finales fueron enviados con Playwright y aceptados por IO1Lab; los valores oficiales y la configuración por instancia están en `results/platform_validation.csv`.
 
 ## Auditoría de alns-joint
 

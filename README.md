@@ -24,6 +24,7 @@ seed=20261109
 max_evals=50000
 max_neighbors=120
 phase_global=auto
+phase_lookahead=0
 ```
 
 También puede vivir fuera del repositorio:
@@ -120,16 +121,16 @@ Grupo `FED`. Los diez `proposed_submissions/` fueron subidos con Playwright y ac
 
 | Instancia | Valor aceptado | Mejor público | Gap |
 |---|---:|---:|---:|
-| 01 | 346.2273 | 327.1137 | +5.84% |
-| 02 | 441.5838 | 412.6585 | +7.01% |
-| 03 | 525.0072 | 483.0249 | +8.69% |
-| 04 | 572.0348 | 528.4404 | +8.25% |
-| 05 | 654.5154 | 606.0450 | +8.00% |
-| 06 | 903.3088 | 760.2939 | +18.81% |
-| 07 | 1091.3296 | 905.6949 | +20.50% |
-| 08 | 1295.6499 | 1077.9824 | +20.19% |
-| 09 | 1294.2657 | 989.9936 | +30.74% |
-| 10 | 1308.1711 | 1001.9073 | +30.57% |
+| 01 | 337.4091 | 326.6046 | +3.31% |
+| 02 | 438.2044 | 404.0021 | +8.47% |
+| 03 | 520.8947 | 475.9221 | +9.45% |
+| 04 | 565.9533 | 525.9226 | +7.61% |
+| 05 | 654.5154 | 591.3411 | +10.68% |
+| 06 | 902.4970 | 754.2413 | +19.66% |
+| 07 | 1073.4233 | 901.9320 | +19.01% |
+| 08 | 1294.2152 | 1077.9824 | +20.06% |
+| 09 | 1273.7104 | 958.7442 | +32.85% |
+| 10 | 1300.1083 | 993.2925 | +30.89% |
 
 Estos valores son la mejor solución aceptada por instancia en la plataforma, no una prueba de optimalidad global. El histórico de intentos y el detalle del algoritmo integrado están en `ALGORITMO_INTEGRADO.md`, `results/integrated_comparison.csv` y `results/platform_validation.csv`.
 
@@ -219,7 +220,7 @@ ALGORITMO_ALNS_RUTAS_MIXTAS.md  método ALNS experimental y diagnóstico
 
 Basada en el enfoque de asignación de tareas por fases de producción y agrupación (*bucketing*) de Bergmann, Kovács y Váncza (2026), adaptado al objetivo específico de minimizar la media de finalización de lotes y a buffers de capacidad unitaria.
 
-La política construye rutas separadas de abastecimiento y retiro: **no usa rutas mixtas**. Cada AGV libre considera semillas para ambas fases, evalúa prefijos de ruta con 1 a C lotes y selecciona la ruta con mejor relación entre urgencia productiva y desplazamiento. La evaluación de salida penaliza bloqueos y demoras de lotes; la de entrada penaliza máquinas desabastecidas. El bucle ILS conserva la mejor solución factible y adapta el sesgo de fases, el tamaño de lote y las secuencias de máquinas. Con `phase_global=auto` se ejecutan dos variantes de asignación AGV (orden por ID y mejor ajuste global) y se conserva la mejor por instancia.
+La política construye rutas separadas de abastecimiento y retiro: **no usa rutas mixtas**. Cada AGV libre considera semillas para ambas fases, evalúa prefijos de ruta con 1 a C lotes y selecciona la ruta con mejor relación entre urgencia productiva y desplazamiento. La evaluación de salida penaliza bloqueos y demoras de lotes; la de entrada penaliza máquinas desabastecidas. El bucle ILS conserva la mejor solución factible y adapta el sesgo de fases, el tamaño de lote y las secuencias de máquinas. Con `phase_global=auto` se ejecutan dos variantes de asignación AGV (orden por ID y mejor ajuste global) y se conserva la mejor por instancia. `phase_lookahead=1` permite reservar una salida futura y esperar en `β` cuando no hay tareas actuales; ayuda en algunas instancias y perjudica en otras, por lo que la configuración final es por instancia (ver `results/platform_validation.csv`).
 
 La salida oficial se genera únicamente al finalizar, y la optimización mantiene el estado en memoria. No reemplazar TXT aceptados hasta verificar que las nuevas medias mejoran en IO1Lab.
 

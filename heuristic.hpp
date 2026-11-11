@@ -20,6 +20,7 @@ struct Options {
     int maxEvals = 1000;
     int maxNeighbors = 40;
     int phaseGlobal = -1;
+    int phaseLookahead = 0;
 };
 
 struct Outcome {
@@ -1000,6 +1001,7 @@ inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) 
     start.mixedRoutes = false;
     start.phaseBias = 0;
     start.phaseGlobal = options.phaseGlobal == 1;
+    start.phaseLookahead = options.phaseLookahead == 1;
     SearchState best;
     best.candidate = start;
     best.result = simulate(in, start, integrated.batchLimit, false);
@@ -1017,6 +1019,7 @@ inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) 
                 variant.phaseAware = true;
                 variant.mixedRoutes = false;
                 variant.phaseGlobal = global;
+                variant.phaseLookahead = options.phaseLookahead == 1;
                 variant.phaseBias = bias;
                 phaseTest(in, current, variant, batch);
             }

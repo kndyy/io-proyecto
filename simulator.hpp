@@ -22,6 +22,7 @@ struct Candidate {
     bool mixedRoutes = false;
     bool phaseAware = false;
     bool phaseGlobal = false;
+    bool phaseLookahead = false;
     int phaseBias = 0;
 };
 
@@ -631,15 +632,25 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         auto& agv = agvs[k];
         const long double H = std::max(1.0L, in.medianTau);
         sim::PhaseChoice best;
-        auto eligible = [&](int j, bool output) {
+        auto eligible = [&](int j, bool output, bool allowFuture) {
             const auto& m = machines[j];
-            return output ? (m.output >= 0 && !m.outputReserved)
-                : (m.input < 0 && !m.inputReserved &&
-                   m.nextFeed < candidate.sequence[j].size());
+            if (output) {
+                if (m.output >= 0) return !m.outputReserved;
+                return allowFuture && !m.outputReserved && m.status == sim::Status::Processing;
+            }
+            return m.input < 0 && !m.inputReserved &&
+                   m.nextFeed < candidate.sequence[j].size();
         };
         auto location = [&](int j, bool output) {
             return output ? in.beta[j] : in.alpha[j];
         };
+        bool anyCurrentOutput = false;
+        bool anyInput = false;
+        for (int j = 0; j < in.m; ++j) {
+            anyCurrentOutput = anyCurrentOutput || eligible(j, true, false);
+            anyInput = anyInput || eligible(j, false, false);
+        }
+        const bool allowFuture = candidate.phaseLookahead && !anyCurrentOutput && !anyInput;
         auto scoreRoute = [&](const sim::PhaseChoice& route) {
             long double t = route.output ? 0 : in.tau[agv.position][in.o];
             int last = route.output ? agv.position : in.o;
@@ -648,13 +659,16 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                 t += in.tau[last][location(j, route.output)];
                 const auto& m = machines[j];
                 if (route.output) {
+                    bool future = m.output < 0;
                     bool work = m.nextFeed < candidate.sequence[j].size() ||
                                 m.input >= 0 || m.inputReserved;
+                    long double ready = future ? result.processEnd[m.current] : now;
+                    long double wait = std::max(0.0L, ready - (now + t));
                     benefit += (m.status == sim::Status::Blocked ? 16.0L : 6.0L) * H
                              + (work ? 2.0L : 0.0L) * H
-                             + 0.20L * (now - m.outputSince)
+                             + (future ? 0.0L : 0.20L * (now - m.outputSince))
                              + static_cast<long double>(candidate.phaseBias) * H;
-                    benefit -= 0.30L * t;
+                    benefit -= 0.30L * t + 0.75L * wait;
                 } else {
                     int lot = candidate.sequence[j][m.nextFeed];
                     long double ready = m.status == sim::Status::Idle ? 0
@@ -674,7 +688,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         };
         for (bool output : {false, true}) {
             for (int seed = 0; seed < in.m; ++seed) {
-                if (!eligible(seed, output)) continue;
+                if (!eligible(seed, output, output && allowFuture)) continue;
                 sim::PhaseChoice route;
                 route.output = output;
                 route.machines.push_back(seed);
@@ -687,7 +701,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                     int next = -1;
                     long double nextScore = -std::numeric_limits<long double>::infinity();
                     for (int j = 0; j < in.m; ++j) {
-                        if (!eligible(j, output) ||
+                        if (!eligible(j, output, false) ||
                             std::find(route.machines.begin(), route.machines.end(), j)
                                 != route.machines.end()) continue;
                         sim::PhaseChoice trial = route;
@@ -715,10 +729,17 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.route.clear();
         agv.incoming.clear();
         agv.load.clear();
+        long double departure = now;
         if (best.output) {
             ++result.phaseOutputTrips;
+            int seed = best.machines.front();
+            bool future = machines[seed].output < 0;
+            if (future) {
+                long double ready = result.processEnd[machines[seed].current];
+                departure = std::max(now, ready - in.tau[agv.position][in.beta[seed]]);
+            }
             for (int j : best.machines) {
-                int lot = machines[j].output;
+                int lot = machines[j].output >= 0 ? machines[j].output : machines[j].current;
                 machines[j].outputReserved = true;
                 agv.route.push_back({in.beta[j], sim::Action::PickBeta, lot});
             }
@@ -738,9 +759,9 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.active = true;
         int first = agv.route.front().destination;
         if (recordLog && agv.position != first)
-            result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
+            result.log.push_back({LogType::Move, k, -1, agv.position, first, departure});
         result.emptyTravel += in.tau[agv.position][first];
-        events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
+        events.push({departure + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
     };
 
     auto settle = [&]() {
