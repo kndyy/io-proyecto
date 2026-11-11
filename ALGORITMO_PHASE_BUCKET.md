@@ -90,7 +90,7 @@ En la prueba reproducible de 50 000 evaluaciones con semilla 20261109 se superar
 | 03 | 566.7783 | 520.8947 | auto 50k, seed 55555 |
 | 04 | 591.5508 | 565.9533 | auto 50k, lookahead |
 | 05 | 716.0324 | 654.5154 | id 50k |
-| 06 | 998.9354 | 902.4970 | auto 50k, lookahead |
+| 06 | 998.9354 | 881.8119 | auto 100k, lookahead |
 | 07 | 1207.7515 | 1073.4233 | auto 50k, lookahead |
 | 08 | 1426.5020 | 1294.2152 | auto 50k, lookahead |
 | 09 | 1477.9573 | 1273.7104 | global 500k |

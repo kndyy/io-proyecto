@@ -4,7 +4,7 @@ instance,objective_average,diagnostic,achieved_at_utc,public_best,gap_vs_public_
 03,520.894700000,FEASIBLE,2026-11-11T16:27:03.851507+00:00,475.9221,9.450,proposed_submissions/instancia_03.txt,phase-bucket,auto 50k,55555,0
 04,565.953300000,FEASIBLE,2026-11-11T16:06:11.465432+00:00,525.9226,7.612,proposed_submissions/instancia_04.txt,phase-bucket,auto 50k,20261109,1
 05,654.515440000,FEASIBLE,2026-11-09T18:47:02.750081+00:00,591.3411,10.683,proposed_submissions/instancia_05.txt,phase-bucket,id 50k,20261109,0
-06,902.497000000,FEASIBLE,2026-11-11T16:10:20.487508+00:00,754.2413,19.656,proposed_submissions/instancia_06.txt,phase-bucket,auto 50k,20261109,1
+06,881.811900000,FEASIBLE,2026-11-11T16:34:34.339662+00:00,754.2413,16.914,proposed_submissions/instancia_06.txt,phase-bucket,auto 100k,20261109,1
 07,1073.423300000,FEASIBLE,2026-11-11T16:10:42.273299+00:00,901.9320,19.014,proposed_submissions/instancia_07.txt,phase-bucket,auto 50k,20261109,1
 08,1294.215200000,FEASIBLE,2026-11-11T16:11:04.072855+00:00,1077.9824,20.059,proposed_submissions/instancia_08.txt,phase-bucket,auto 50k,20261109,1
 09,1273.710400000,FEASIBLE,2026-11-11T16:23:20.108228+00:00,958.7442,32.852,proposed_submissions/instancia_09.txt,phase-bucket,global 500k,20261109,0
