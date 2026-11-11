@@ -27,6 +27,8 @@ struct Candidate {
     bool phaseJoint = false;
     bool phaseOutboundOnly = false;
     bool phaseHardUnblock = false;
+    bool learnedPolicy = false;
+    std::array<double, 9> dispatchWeights{1, 0, 0, 0, 0, 0, 0, 0, 0};
     int phaseBias = 0;
 };
 
@@ -812,6 +814,106 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         return best;
     };
 
+    auto phaseGeneratedChoices = [&](int k) {
+        std::vector<sim::PhaseChoice> choices;
+        for (bool output : {false, true}) {
+            for (int seed = 0; seed < in.m; ++seed) {
+                if (!phaseEligible(seed, output, false)) continue;
+                sim::PhaseChoice route;
+                route.output = output;
+                route.machines.push_back(seed);
+                route.score = phaseScoreRoute(k, route);
+                route.travel = phaseTravel(k, route);
+                phaseMasks(route);
+                choices.push_back(route);
+                while (static_cast<int>(route.machines.size()) < batchLimit) {
+                    int next = -1;
+                    long double nextScore = -std::numeric_limits<long double>::infinity();
+                    for (int j = 0; j < in.m; ++j) {
+                        if (!phaseEligible(j, output, false) ||
+                            std::find(route.machines.begin(), route.machines.end(), j)
+                                != route.machines.end()) continue;
+                        sim::PhaseChoice trial = route;
+                        trial.machines.push_back(j);
+                        long double value = phaseScoreRoute(k, trial);
+                        if (value > nextScore) {
+                            nextScore = value;
+                            next = j;
+                        }
+                    }
+                    if (next < 0) break;
+                    route.machines.push_back(next);
+                    route.score = phaseScoreRoute(k, route);
+                    route.travel = phaseTravel(k, route);
+                    phaseMasks(route);
+                    choices.push_back(route);
+                }
+            }
+        }
+        return choices;
+    };
+
+    auto phaseFeatures = [&](int k, const sim::PhaseChoice& route) {
+        std::array<long double, 9> phi{};
+        const long double H = std::max(1.0L, in.medianTau);
+        const long double C = static_cast<long double>(in.C);
+        phi[0] = phaseScoreRoute(k, route);
+        long double empty = route.output
+            ? in.tau[agvs[k].position][in.beta[route.machines.front()]]
+            : in.tau[agvs[k].position][in.o];
+        long double loaded = std::max(0.0L, route.travel - empty);
+        long double age = 0;
+        long double wait = 0;
+        long double exposure = 0;
+        long double t = route.output ? 0 : in.tau[agvs[k].position][in.o];
+        int last = route.output ? agvs[k].position : in.o;
+        for (int j : route.machines) {
+            t += in.tau[last][phaseLocation(j, route.output)];
+            const auto& m = machines[j];
+            long double eta = now + t;
+            if (route.output) {
+                if (m.status == sim::Status::Blocked) ++phi[1];
+                age += std::max(0.0L, now - m.outputSince);
+                if (m.status == sim::Status::Blocked) exposure += 2;
+                if (m.status == sim::Status::Processing)
+                    exposure += std::max(0.0L, result.processEnd[m.current] - now) / H;
+            } else {
+                if (m.status == sim::Status::Idle) ++phi[2];
+                long double ready = m.status == sim::Status::Idle ? now
+                    : m.status == sim::Status::Processing ? result.processEnd[m.current]
+                    : now + 2 * H;
+                wait += std::max(0.0L, ready - eta);
+                if (m.status == sim::Status::Idle) exposure += (eta - now) / H;
+                if (m.output >= 0) exposure += 2;
+            }
+            last = phaseLocation(j, route.output);
+        }
+        phi[3] = -empty / H;
+        phi[4] = -loaded / H;
+        phi[5] = static_cast<long double>(route.machines.size()) / C;
+        phi[6] = route.output ? std::clamp(age / (H * C), -5.0L, 5.0L) : 0;
+        phi[7] = -wait / H;
+        phi[8] = -exposure;
+        return phi;
+    };
+
+    auto phaseLearnedChoice = [&](int k) {
+        sim::PhaseChoice best;
+        long double bestScore = -std::numeric_limits<long double>::infinity();
+        auto choices = phaseGeneratedChoices(k);
+        for (const auto& route : choices) {
+            auto phi = phaseFeatures(k, route);
+            long double score = 0;
+            for (int d = 0; d < 9; ++d)
+                score += static_cast<long double>(candidate.dispatchWeights[d]) * phi[d];
+            if (score > bestScore) {
+                bestScore = score;
+                best = route;
+            }
+        }
+        return best;
+    };
+
     auto phaseCandidates = [&](int k, bool onlyOutput = false) {
         struct Seed {
             long double score = -std::numeric_limits<long double>::infinity();
@@ -1089,6 +1191,36 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         for (int k = 0; k < in.K; ++k) {
             if (agvs[k].active) continue;
             if (candidate.phaseAware) {
+                if (candidate.learnedPolicy) {
+                    if (candidate.phaseGlobal) {
+                        std::vector<char> free(in.K, 0);
+                        for (int q = 0; q < in.K; ++q) free[q] = agvs[q].active ? 0 : 1;
+                        while (true) {
+                            int bestK = -1;
+                            sim::PhaseChoice bestChoice;
+                            for (int q = 0; q < in.K; ++q) {
+                                if (!free[q]) continue;
+                                sim::PhaseChoice choice = phaseLearnedChoice(q);
+                                if (choice.machines.empty()) continue;
+                                if (bestK < 0 || choice.score > bestChoice.score + sim::EPS ||
+                                    (std::fabs(choice.score - bestChoice.score) <= sim::EPS && q < bestK)) {
+                                    bestK = q;
+                                    bestChoice = std::move(choice);
+                                }
+                            }
+                            if (bestK < 0) break;
+                            applyPhaseChoice(bestK, bestChoice);
+                            free[bestK] = 0;
+                        }
+                    } else {
+                        for (int q = 0; q < in.K; ++q) {
+                            if (agvs[q].active) continue;
+                            sim::PhaseChoice choice = phaseLearnedChoice(q);
+                            if (!choice.machines.empty()) applyPhaseChoice(q, choice);
+                        }
+                    }
+                    continue;
+                }
                 if (candidate.phaseHardUnblock) {
                     bool anyBlocked = false;
                     for (int j = 0; j < in.m; ++j) {

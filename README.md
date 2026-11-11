@@ -59,6 +59,7 @@ Para cambiar de solución no hace falta recompilar.
 | `alns-joint` | ALNS con destrucción/reparación, prioridades por lote y rutas AGV mixtas | experimental |
 | `phase-bucket` | ILS + despacho de AGVs guiado por fase y viajes de longitud adaptativa | por defecto, validada |
 | `phase-joint` | BEJ-AGV: enumeración acotada de rutas completas + asignación conjunta de AGVs | experimental, no promovida |
+| `phase-learned` | CEM aprende los pesos de las features de despacho sobre rutas phase-bucket | experimental, no promovida |
 
 `phase-bucket` es la estrategia por defecto: superó los diez resultados históricos y los diez TXT fueron aceptados por IO1Lab. `integrated` y `alns-joint` se conservan como comparadores; `alns-joint` es experimental y sus rutas mixtas mostraron bloqueo excesivo. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote.
 
@@ -205,7 +206,7 @@ instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
 selector.conf     selector externo en tiempo de ejecución
-tools/            comparación, generación, validación, diagnóstico y bench_joint
+tools/            comparación, validación, diagnóstico, bench_joint y learn_dispatch
 instances/        diez instancias oficiales
 materials/        paquete original recibido
 results/          resultados, comparativas y validación en plataforma
@@ -235,6 +236,29 @@ python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed 20261109 --out
 ```
 
 El workflow `.github/workflows/phase-monitor.yml` compila, ejecuta los self-tests, compara las diez instancias y guarda CSV/TXT en artefactos temporales de Actions; la corrida diaria es corta y las actualizaciones del código ejecutan una comparación de 50 000 evaluaciones por instancia. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` es `phase-bucket`. Los diez TXT de 50k fueron enviados con Playwright y aceptados por IO1Lab; la publicación manual no se automatiza.
+
+## Estrategia `phase-learned` (experimental, no promovida)
+
+`phase-learned` conserva el generador y la factibilidad de `phase-bucket`, pero reemplaza el ranking de rutas por una combinación lineal de nueve features: score antiguo, bloqueos, máquinas ociosas, viaje vacío/cargado, fill, edad de salidas, espera y exposición. Los pesos se optimizan offline con CEM (`tools/learn_dispatch.cpp`) sobre secuencias congeladas; el buscador ILS/VND existente se reutiliza. El binario carga los pesos con `--policy-file`.
+
+Resultado de la gate A2:
+
+- CEM global sobre 09/10, snapshots congelados de 5k y de 20k, población 32, élite 8, 25 generaciones.
+- El mejor vector encontrado fue el baseline `{1,0,0,0,0,0,0,0,0}`; el holdout quedó en ratio `1.000` para 09 y 10.
+- No hubo mejora de 1.5% en ninguna de las dos instancias; la gate A2 falla y no se promueve.
+- Los pesos `{1,0,...}` con `phase-learned` reproducen exactamente `phase-bucket` en la regresión de 1k.
+
+El plan B de rollout selectivo no se implementó en esta iteración; requeriría el refactor de estado clonable y no se justifica mientras A no pase. No se envió nada a IO1Lab.
+
+```bash
+g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/learn_dispatch.cpp -o learn_dispatch
+./learn_dispatch 20000
+./io1 --input instances/instancia_09.io1 --strategy phase-learned \
+  --seed 20261109 --max-evals 20000 --max-neighbors 120 \
+  --policy-file experiments/local/policy_global.txt
+```
+
+Los resultados de entrenamiento quedan en `experiments/local/` (ignorado por git).
 
 ## Estrategia `phase-joint` (experimental, no promovida)
 

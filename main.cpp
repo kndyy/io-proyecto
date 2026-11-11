@@ -1,6 +1,7 @@
 #include "heuristic.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -28,6 +29,8 @@ struct Config {
     int phaseLookahead = 0;
     int phaseOutboundOnly = 0;
     int phaseHardUnblock = 0;
+    std::string policyFile;
+    std::array<double, 9> dispatchWeights{1, 0, 0, 0, 0, 0, 0, 0, 0};
     bool selfTest = false;
     bool listStrategies = false;
     bool dispatchAblation = false;
@@ -127,6 +130,7 @@ Config parseArguments(int argc, char** argv) {
         else if (arg == "--phase-lookahead") { phaseLookahead = std::stoi(value()) == 0 ? 0 : 1; hasPhaseLookahead = true; }
         else if (arg == "--phase-outbound-only") { phaseOutboundOnly = std::stoi(value()) == 0 ? 0 : 1; hasPhaseOutboundOnly = true; }
         else if (arg == "--phase-hard-unblock") { phaseHardUnblock = std::stoi(value()) == 0 ? 0 : 1; hasPhaseHardUnblock = true; }
+        else if (arg == "--policy-file") config.policyFile = value();
         else if (arg == "--self-test") config.selfTest = true;
         else if (arg == "--list-strategies") config.listStrategies = true;
         else if (arg == "--dispatch-ablation") config.dispatchAblation = true;
@@ -147,6 +151,17 @@ Config parseArguments(int argc, char** argv) {
     if (hasPhaseLookahead) config.phaseLookahead = phaseLookahead;
     if (hasPhaseOutboundOnly) config.phaseOutboundOnly = phaseOutboundOnly;
     if (hasPhaseHardUnblock) config.phaseHardUnblock = phaseHardUnblock;
+    if (!config.policyFile.empty()) {
+        std::ifstream file(config.policyFile);
+        std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        for (char& c : text) if (c == ',') c = ' ';
+        std::stringstream stream(text);
+        for (int i = 0; i < 9; ++i) {
+            double value = 0;
+            if (!(stream >> value)) break;
+            config.dispatchWeights[i] = value;
+        }
+    }
     return config;
 }
 
@@ -413,7 +428,8 @@ void printUsage() {
     std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--txt <envio.txt>]\n"
               << "       [--from-txt <envio_previo.txt>] [--selector <archivo>]\n"
               << "       [--strategy <nombre>] [--seed <entero>] [--max-evals <entero>]\n"
-              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>] [--phase-outbound-only <0|1>] [--phase-hard-unblock <0|1>]\n"
+              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>]\n"
+              << "       [--phase-outbound-only <0|1>] [--phase-hard-unblock <0|1>] [--policy-file <archivo>]\n"
               << "       [--self-test] [--list-strategies] [--dispatch-ablation]\n";
 }
 
@@ -426,7 +442,7 @@ int main(int argc, char** argv) {
         }
         if (config.listStrategies) {
             for (const char* name : {"b1", "b2", "b3", "s0", "s1", "s2",
-                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint", "phase-bucket", "phase-joint"}) {
+                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint", "phase-bucket", "phase-joint", "phase-learned"}) {
                 std::cout << name << '\n';
             }
             return 0;
@@ -461,6 +477,8 @@ int main(int argc, char** argv) {
 
         Instance in = loadInstance(config.input);
         Options options{config.seed, config.maxEvals, config.maxNeighbors, config.phaseGlobal, config.phaseLookahead, config.phaseOutboundOnly, config.phaseHardUnblock};
+        options.learnedPolicy = config.strategy == "phase-learned";
+        options.dispatchWeights = config.dispatchWeights;
         auto begin = std::chrono::steady_clock::now();
         Outcome outcome;
         if (!config.fromTxt.empty()) {

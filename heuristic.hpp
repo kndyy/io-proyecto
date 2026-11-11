@@ -13,7 +13,7 @@
 
 namespace io1 {
 
-enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket, PhaseJoint };
+enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket, PhaseJoint, PhaseLearned };
 
 struct Options {
     std::uint64_t seed = 20261106;
@@ -23,6 +23,8 @@ struct Options {
     int phaseLookahead = 0;
     int phaseOutboundOnly = 0;
     int phaseHardUnblock = 0;
+    bool learnedPolicy = false;
+    std::array<double, 9> dispatchWeights{1, 0, 0, 0, 0, 0, 0, 0, 0};
 };
 
 struct Outcome {
@@ -50,6 +52,7 @@ inline bool strategyFromName(const std::string& name, Strategy& strategy) {
     else if (name == "alns-joint") strategy = Strategy::AlnsJoint;
     else if (name == "phase-bucket") strategy = Strategy::PhaseBucket;
     else if (name == "phase-joint") strategy = Strategy::PhaseJoint;
+    else if (name == "phase-learned") strategy = Strategy::PhaseLearned;
     else return false;
     return true;
 }
@@ -70,6 +73,7 @@ inline std::string strategyName(Strategy strategy) {
         case Strategy::AlnsJoint: return "alns-joint";
         case Strategy::PhaseBucket: return "phase-bucket";
         case Strategy::PhaseJoint: return "phase-joint";
+        case Strategy::PhaseLearned: return "phase-learned";
     }
     return "vnd";
 }
@@ -1060,6 +1064,8 @@ inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) 
     start.phaseLookahead = options.phaseLookahead == 1;
     start.phaseOutboundOnly = options.phaseOutboundOnly == 1;
     start.phaseHardUnblock = options.phaseHardUnblock == 1;
+    start.learnedPolicy = options.learnedPolicy;
+    start.dispatchWeights = options.dispatchWeights;
     SearchState best;
     best.candidate = start;
     best.result = simulate(in, start, integrated.batchLimit, false);
@@ -1142,6 +1148,16 @@ inline Outcome solvePhaseJoint(const Instance& in, const Options& options) {
     return outcome;
 }
 
+inline Outcome solvePhaseLearned(const Instance& in, const Options& options) {
+    Options local = options;
+    local.learnedPolicy = true;
+    local.phaseOutboundOnly = 0;
+    local.phaseHardUnblock = 0;
+    Outcome outcome = solvePhaseBucketMode(in, local);
+    outcome.strategy = "phase-learned";
+    return outcome;
+}
+
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {
     Outcome outcome;
     outcome.strategy = strategyName(strategy);
@@ -1149,6 +1165,7 @@ inline Outcome solve(const Instance& in, Strategy strategy, const Options& optio
     if (strategy == Strategy::AlnsJoint) return solveAlnsJoint(in, options);
     if (strategy == Strategy::PhaseBucket) return solvePhaseBucket(in, options);
     if (strategy == Strategy::PhaseJoint) return solvePhaseJoint(in, options);
+    if (strategy == Strategy::PhaseLearned) return solvePhaseLearned(in, options);
 
     if (strategy == Strategy::B1 || strategy == Strategy::B2 || strategy == Strategy::B3) {
         std::vector<int> order = strategy == Strategy::B2 ? orderByFastest(in) : orderById(in);
