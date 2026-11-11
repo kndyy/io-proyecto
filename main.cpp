@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -25,8 +26,11 @@ struct Config {
     int maxNeighbors = 40;
     int phaseGlobal = -1;
     int phaseLookahead = 0;
+    int phaseOutboundOnly = 0;
+    int phaseHardUnblock = 0;
     bool selfTest = false;
     bool listStrategies = false;
+    bool dispatchAblation = false;
     bool help = false;
 };
 
@@ -71,6 +75,12 @@ void loadSelector(const std::string& path, Config& config) {
         else if (key == "phase_lookahead") {
             config.phaseLookahead = std::stoi(value) == 0 ? 0 : 1;
         }
+        else if (key == "phase_outbound_only") {
+            config.phaseOutboundOnly = std::stoi(value) == 0 ? 0 : 1;
+        }
+        else if (key == "phase_hard_unblock") {
+            config.phaseHardUnblock = std::stoi(value) == 0 ? 0 : 1;
+        }
     }
 }
 
@@ -83,11 +93,15 @@ Config parseArguments(int argc, char** argv) {
     bool hasMaxNeighbors = false;
     bool hasPhaseGlobal = false;
     bool hasPhaseLookahead = false;
+    bool hasPhaseOutboundOnly = false;
+    bool hasPhaseHardUnblock = false;
     std::uint64_t seed = 0;
     int maxEvals = 0;
     int maxNeighbors = 0;
     int phaseGlobal = -1;
     int phaseLookahead = 0;
+    int phaseOutboundOnly = 0;
+    int phaseHardUnblock = 0;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -111,8 +125,11 @@ Config parseArguments(int argc, char** argv) {
             hasPhaseGlobal = true;
         }
         else if (arg == "--phase-lookahead") { phaseLookahead = std::stoi(value()) == 0 ? 0 : 1; hasPhaseLookahead = true; }
+        else if (arg == "--phase-outbound-only") { phaseOutboundOnly = std::stoi(value()) == 0 ? 0 : 1; hasPhaseOutboundOnly = true; }
+        else if (arg == "--phase-hard-unblock") { phaseHardUnblock = std::stoi(value()) == 0 ? 0 : 1; hasPhaseHardUnblock = true; }
         else if (arg == "--self-test") config.selfTest = true;
         else if (arg == "--list-strategies") config.listStrategies = true;
+        else if (arg == "--dispatch-ablation") config.dispatchAblation = true;
         else if (arg == "--help" || arg == "-h") config.help = true;
         else throw std::runtime_error("argumento desconocido: " + arg);
     }
@@ -128,6 +145,8 @@ Config parseArguments(int argc, char** argv) {
     if (hasMaxNeighbors) config.maxNeighbors = maxNeighbors;
     if (hasPhaseGlobal) config.phaseGlobal = phaseGlobal;
     if (hasPhaseLookahead) config.phaseLookahead = phaseLookahead;
+    if (hasPhaseOutboundOnly) config.phaseOutboundOnly = phaseOutboundOnly;
+    if (hasPhaseHardUnblock) config.phaseHardUnblock = phaseHardUnblock;
     return config;
 }
 
@@ -333,12 +352,69 @@ void writeTxt(const Instance& in, const Outcome& outcome, const std::string& pat
     }
 }
 
+void runDispatchAblation(const Instance& in, const Config& config) {
+    Options freezeOptions{config.seed, 5000, config.maxNeighbors, 0, 0};
+    Outcome frozen = solvePhaseBucketMode(in, freezeOptions);
+    std::vector<std::pair<std::string, Candidate>> modes;
+    Candidate base = frozen.candidate;
+    base.phaseAware = true;
+    base.mixedRoutes = false;
+    base.phaseLookahead = false;
+    base.phaseBias = frozen.candidate.phaseBias;
+    base.phaseGlobal = false;
+    base.phaseEnumerated = false;
+    base.phaseJoint = false;
+    Candidate g0 = base;
+    modes.push_back({"G0", g0});
+    Candidate g1 = base;
+    g1.phaseGlobal = true;
+    modes.push_back({"G1", g1});
+    Candidate r = base;
+    r.phaseEnumerated = true;
+    modes.push_back({"R", r});
+    Candidate j = r;
+    j.phaseJoint = true;
+    modes.push_back({"J", j});
+    for (const auto& entry : modes) {
+        auto begin = std::chrono::steady_clock::now();
+        Result result = simulate(in, entry.second, frozen.batchLimit, false);
+        auto end = std::chrono::steady_clock::now();
+        double cpu = std::chrono::duration<double, std::milli>(end - begin).count();
+        long double starved = std::accumulate(result.machineStarvedByMachine.begin(),
+                                              result.machineStarvedByMachine.end(), 0.0L);
+        std::cout << "ABLATION instance=" << stem(config.input)
+                  << " seed=" << config.seed
+                  << " mode=" << entry.first
+                  << " mean=" << std::fixed << std::setprecision(6) << result.mean
+                  << " feasible=" << (result.feasible ? 1 : 0)
+                  << " batch_limit=" << frozen.batchLimit
+                  << " blocked=" << result.blockedTime
+                  << " empty=" << result.emptyTravel
+                  << " loaded=" << result.loadedTravel
+                  << " in_trips=" << result.phaseInputTrips
+                  << " out_trips=" << result.phaseOutputTrips
+                  << " in_lots=" << result.phaseInputLots
+                  << " out_lots=" << result.phaseOutputLots
+                  << " output_fill=" << (result.phaseOutputTrips > 0
+                        ? static_cast<long double>(result.phaseOutputLots) /
+                          (result.phaseOutputTrips * in.C) : 0)
+                  << " machine_starved=" << starved
+                  << " multi_free_pct=" << (result.dispatchEpochCount > 0
+                        ? 100.0L * result.multiFreeEpochCount / result.dispatchEpochCount : 0)
+                  << " candidate_routes=" << result.candidateRoutes
+                  << " dfs_nodes=" << result.dfsNodes
+                  << " joint_choices=" << result.jointChoicesUsed
+                  << " cpu_ms=" << cpu
+                  << '\n';
+    }
+}
+
 void printUsage() {
     std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--txt <envio.txt>]\n"
               << "       [--from-txt <envio_previo.txt>] [--selector <archivo>]\n"
               << "       [--strategy <nombre>] [--seed <entero>] [--max-evals <entero>]\n"
-              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>]\n"
-              << "       [--self-test] [--list-strategies]\n";
+              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>] [--phase-outbound-only <0|1>] [--phase-hard-unblock <0|1>]\n"
+              << "       [--self-test] [--list-strategies] [--dispatch-ablation]\n";
 }
 
 int main(int argc, char** argv) {
@@ -350,9 +426,18 @@ int main(int argc, char** argv) {
         }
         if (config.listStrategies) {
             for (const char* name : {"b1", "b2", "b3", "s0", "s1", "s2",
-                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint", "phase-bucket"}) {
+                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint", "phase-bucket", "phase-joint"}) {
                 std::cout << name << '\n';
             }
+            return 0;
+        }
+        if (config.dispatchAblation) {
+            if (config.input.empty()) {
+                printUsage();
+                return 1;
+            }
+            Instance in = loadInstance(config.input);
+            runDispatchAblation(in, config);
             return 0;
         }
         if (config.selfTest) {
@@ -375,7 +460,7 @@ int main(int argc, char** argv) {
         }
 
         Instance in = loadInstance(config.input);
-        Options options{config.seed, config.maxEvals, config.maxNeighbors, config.phaseGlobal, config.phaseLookahead};
+        Options options{config.seed, config.maxEvals, config.maxNeighbors, config.phaseGlobal, config.phaseLookahead, config.phaseOutboundOnly, config.phaseHardUnblock};
         auto begin = std::chrono::steady_clock::now();
         Outcome outcome;
         if (!config.fromTxt.empty()) {
@@ -414,6 +499,24 @@ int main(int argc, char** argv) {
                   << " loaded_travel=" << outcome.result.loadedTravel
                   << " phase_input_trips=" << outcome.result.phaseInputTrips
                   << " phase_output_trips=" << outcome.result.phaseOutputTrips
+                  << " phase_input_lots=" << outcome.result.phaseInputLots
+                  << " phase_output_lots=" << outcome.result.phaseOutputLots
+                  << " output_fill=" << (outcome.result.phaseOutputTrips > 0
+                        ? static_cast<long double>(outcome.result.phaseOutputLots) /
+                          (outcome.result.phaseOutputTrips * in.C) : 0)
+                  << " machine_starved=" << std::accumulate(
+                        outcome.result.machineStarvedByMachine.begin(),
+                        outcome.result.machineStarvedByMachine.end(), 0.0L)
+                  << " dispatch_epochs=" << outcome.result.dispatchEpochCount
+                  << " multi_free_epochs=" << outcome.result.multiFreeEpochCount
+                  << " multi_free_pct=" << (outcome.result.dispatchEpochCount > 0
+                        ? 100.0L * outcome.result.multiFreeEpochCount /
+                          outcome.result.dispatchEpochCount : 0)
+                  << " max_free=" << outcome.result.maxSimultaneouslyFree
+                  << " candidate_routes=" << outcome.result.candidateRoutes
+                  << " dfs_nodes=" << outcome.result.dfsNodes
+                  << " joint_choices=" << outcome.result.jointChoicesUsed
+                  << " makespan=" << outcome.result.makespan
                   << '\n';
         return outcome.result.feasible ? 0 : 1;
     } catch (const std::exception& error) {

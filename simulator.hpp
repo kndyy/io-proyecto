@@ -23,6 +23,10 @@ struct Candidate {
     bool phaseAware = false;
     bool phaseGlobal = false;
     bool phaseLookahead = false;
+    bool phaseEnumerated = false;
+    bool phaseJoint = false;
+    bool phaseOutboundOnly = false;
+    bool phaseHardUnblock = false;
     int phaseBias = 0;
 };
 
@@ -46,6 +50,7 @@ struct Result {
     std::vector<long double> blockedByMachine;
     std::array<int, 3> mixedRouteCounts{0, 0, 0};
     long double mean = std::numeric_limits<long double>::infinity();
+    long double makespan = 0;
     long double blockedTime = 0;
     int blockedCount = 0;
     int deliveries = 0;
@@ -54,6 +59,18 @@ struct Result {
     long double machineIdleTime = 0;
     int phaseInputTrips = 0;
     int phaseOutputTrips = 0;
+    int phaseInputLots = 0;
+    int phaseOutputLots = 0;
+    std::vector<long double> emptyTravelByAgv;
+    std::vector<long double> loadedTravelByAgv;
+    std::vector<long double> idleVehicleTimeByAgv;
+    std::vector<long double> machineStarvedByMachine;
+    long long dispatchEpochCount = 0;
+    long long multiFreeEpochCount = 0;
+    int maxSimultaneouslyFree = 0;
+    long long candidateRoutes = 0;
+    long long dfsNodes = 0;
+    int jointChoicesUsed = 0;
 };
 
 namespace sim {
@@ -120,6 +137,9 @@ struct PhaseChoice {
     bool output = false;
     std::vector<int> machines;
     long double score = -std::numeric_limits<long double>::infinity();
+    long double travel = 0;
+    std::uint32_t inputMask = 0;
+    std::uint32_t outputMask = 0;
 };
 
 }
@@ -131,6 +151,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
     result.processStart.assign(in.n, std::numeric_limits<long double>::infinity());
     result.processEnd.assign(in.n, std::numeric_limits<long double>::infinity());
     result.blockedByMachine.assign(in.m, 0);
+    result.emptyTravelByAgv.assign(in.K, 0);
+    result.loadedTravelByAgv.assign(in.K, 0);
+    result.idleVehicleTimeByAgv.assign(in.K, 0);
+    result.machineStarvedByMachine.assign(in.m, 0);
 
     std::vector<sim::Machine> machines(in.m);
     std::vector<sim::Agv> agvs(in.K);
@@ -146,6 +170,18 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
     long double now = 0;
     int delivered = 0;
     std::vector<long double> idleSince(in.m, 0);
+    std::vector<long double> vehicleIdleSince(in.K, 0);
+    std::vector<long double> starvedSince(in.m, 0);
+
+    auto markAgvBusy = [&](int k) {
+        if (vehicleIdleSince[k] >= 0) {
+            result.idleVehicleTimeByAgv[k] += now - vehicleIdleSince[k];
+            vehicleIdleSince[k] = -1;
+        }
+    };
+    auto markAgvIdle = [&](int k) {
+        vehicleIdleSince[k] = now;
+    };
 
     auto startMachine = [&](int j) {
         auto& m = machines[j];
@@ -154,6 +190,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         m.current = lot;
         m.status = sim::Status::Processing;
         result.machineIdleTime += now - idleSince[j];
+        if (starvedSince[j] >= 0) {
+            result.machineStarvedByMachine[j] += now - starvedSince[j];
+            starvedSince[j] = -1;
+        }
         long double start = now + sim::RELEASE_GUARD;
         long double end = start + in.duration(lot, j);
         result.processStart[lot] = start;
@@ -171,9 +211,12 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             m.current = -1;
             m.status = sim::Status::Idle;
             idleSince[j] = now;
+            starvedSince[j] = (m.input < 0 && m.nextFeed < candidate.sequence[j].size())
+                ? now : -1;
         } else {
             m.status = sim::Status::Blocked;
             m.blockStart = now;
+            starvedSince[j] = -1;
             ++result.blockedCount;
         }
     };
@@ -256,9 +299,14 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.load.clear();
         agv.step = 0;
         agv.active = true;
+        markAgvBusy(k);
+        ++result.phaseInputTrips;
+        result.phaseInputLots += static_cast<int>(lots.size());
         if (recordLog && agv.position != in.o) {
             result.log.push_back({LogType::Move, k, -1, agv.position, in.o, now});
         }
+        result.emptyTravel += in.tau[agv.position][in.o];
+        result.emptyTravelByAgv[k] += in.tau[agv.position][in.o];
         events.push({now + in.tau[agv.position][in.o] + sim::RELEASE_GUARD, 1, k});
         return true;
     };
@@ -325,10 +373,15 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.load.clear();
         agv.step = 0;
         agv.active = true;
+        markAgvBusy(k);
+        ++result.phaseOutputTrips;
+        result.phaseOutputLots += static_cast<int>(lots.size());
         int first = in.beta[chosen.front()];
         if (recordLog && agv.position != first) {
             result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
         }
+        result.emptyTravel += in.tau[agv.position][first];
+        result.emptyTravelByAgv[k] += in.tau[agv.position][first];
         events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
         return true;
     };
@@ -575,9 +628,12 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.step = 0;
         agv.active = true;
         int first = agv.route.front().destination;
+        markAgvBusy(k);
         if (recordLog && agv.position != first) {
             result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
         }
+        result.emptyTravel += in.tau[agv.position][first];
+        result.emptyTravelByAgv[k] += in.tau[agv.position][first];
         events.push({now + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
         return true;
     };
@@ -628,85 +684,115 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
     };
 
 
-    auto phaseBestChoice = [&](int k) {
-        auto& agv = agvs[k];
+    auto phaseEligible = [&](int j, bool output, bool allowFuture) {
+        const auto& m = machines[j];
+        if (output) {
+            if (m.output >= 0) return !m.outputReserved;
+            return allowFuture && !m.outputReserved && m.status == sim::Status::Processing;
+        }
+        return m.input < 0 && !m.inputReserved &&
+               m.nextFeed < candidate.sequence[j].size();
+    };
+    auto phaseLocation = [&](int j, bool output) {
+        return output ? in.beta[j] : in.alpha[j];
+    };
+    auto phaseTravel = [&](int k, const sim::PhaseChoice& route) {
+        long double t = route.output ? 0 : in.tau[agvs[k].position][in.o];
+        int last = route.output ? agvs[k].position : in.o;
+        for (int j : route.machines) {
+            t += in.tau[last][phaseLocation(j, route.output)];
+            last = phaseLocation(j, route.output);
+        }
+        if (route.output) t += in.tau[last][in.f];
+        return t;
+    };
+    auto phaseMasks = [&](sim::PhaseChoice& route) {
+        route.inputMask = 0;
+        route.outputMask = 0;
+        for (int j : route.machines) {
+            if (route.output) route.outputMask |= (1u << j);
+            else route.inputMask |= (1u << j);
+        }
+    };
+    auto phaseScoreRoute = [&](int k, const sim::PhaseChoice& route) {
+        (void)k;
         const long double H = std::max(1.0L, in.medianTau);
-        sim::PhaseChoice best;
-        auto eligible = [&](int j, bool output, bool allowFuture) {
+        const auto& agv = agvs[k];
+        long double t = route.output ? 0 : in.tau[agv.position][in.o];
+        int last = route.output ? agv.position : in.o;
+        long double benefit = 0;
+        for (int j : route.machines) {
+            t += in.tau[last][phaseLocation(j, route.output)];
             const auto& m = machines[j];
-            if (output) {
-                if (m.output >= 0) return !m.outputReserved;
-                return allowFuture && !m.outputReserved && m.status == sim::Status::Processing;
+            if (route.output) {
+                bool future = m.output < 0;
+                bool work = m.nextFeed < candidate.sequence[j].size() ||
+                            m.input >= 0 || m.inputReserved;
+                long double ready = future ? result.processEnd[m.current] : now;
+                long double wait = std::max(0.0L, ready - (now + t));
+                benefit += (m.status == sim::Status::Blocked ? 16.0L : 6.0L) * H
+                         + (work ? 2.0L : 0.0L) * H
+                         + (future ? 0.0L : 0.20L * (now - m.outputSince))
+                         + static_cast<long double>(candidate.phaseBias) * H;
+                benefit -= 0.30L * t + 0.75L * wait;
+            } else {
+                int lot = candidate.sequence[j][m.nextFeed];
+                long double ready = m.status == sim::Status::Idle ? 0
+                    : m.status == sim::Status::Processing
+                        ? std::max(0.0L, result.processEnd[m.current] - now)
+                        : 2 * H;
+                benefit += (m.status == sim::Status::Idle ? 10.0L : 5.0L) * H
+                         + H / (1.0L + in.duration(lot, j) / H)
+                         - static_cast<long double>(candidate.phaseBias) * H;
+                benefit -= 0.35L * std::max(0.0L, t - ready);
+                if (m.output >= 0) benefit -= 4 * H;
             }
-            return m.input < 0 && !m.inputReserved &&
-                   m.nextFeed < candidate.sequence[j].size();
-        };
-        auto location = [&](int j, bool output) {
-            return output ? in.beta[j] : in.alpha[j];
-        };
+            last = phaseLocation(j, route.output);
+        }
+        if (route.output) t += in.tau[last][in.f];
+        return (benefit - 1.5L * t) / (H + t);
+    };
+    auto phaseTaskLot = [&](int j, bool output) {
+        return output ? machines[j].output : candidate.sequence[j][machines[j].nextFeed];
+    };
+    auto phaseRouteLess = [&](const sim::PhaseChoice& a, const sim::PhaseChoice& b) {
+        if (a.score != b.score) return a.score > b.score;
+        if (a.travel != b.travel) return a.travel < b.travel;
+        if (a.output != b.output) return a.output;
+        return a.machines < b.machines;
+    };
+
+    auto phaseBestChoice = [&](int k) {
+        sim::PhaseChoice best;
         bool anyCurrentOutput = false;
         bool anyInput = false;
         for (int j = 0; j < in.m; ++j) {
-            anyCurrentOutput = anyCurrentOutput || eligible(j, true, false);
-            anyInput = anyInput || eligible(j, false, false);
+            anyCurrentOutput = anyCurrentOutput || phaseEligible(j, true, false);
+            anyInput = anyInput || phaseEligible(j, false, false);
         }
         const bool allowFuture = candidate.phaseLookahead && !anyCurrentOutput && !anyInput;
-        auto scoreRoute = [&](const sim::PhaseChoice& route) {
-            long double t = route.output ? 0 : in.tau[agv.position][in.o];
-            int last = route.output ? agv.position : in.o;
-            long double benefit = 0;
-            for (int j : route.machines) {
-                t += in.tau[last][location(j, route.output)];
-                const auto& m = machines[j];
-                if (route.output) {
-                    bool future = m.output < 0;
-                    bool work = m.nextFeed < candidate.sequence[j].size() ||
-                                m.input >= 0 || m.inputReserved;
-                    long double ready = future ? result.processEnd[m.current] : now;
-                    long double wait = std::max(0.0L, ready - (now + t));
-                    benefit += (m.status == sim::Status::Blocked ? 16.0L : 6.0L) * H
-                             + (work ? 2.0L : 0.0L) * H
-                             + (future ? 0.0L : 0.20L * (now - m.outputSince))
-                             + static_cast<long double>(candidate.phaseBias) * H;
-                    benefit -= 0.30L * t + 0.75L * wait;
-                } else {
-                    int lot = candidate.sequence[j][m.nextFeed];
-                    long double ready = m.status == sim::Status::Idle ? 0
-                        : m.status == sim::Status::Processing
-                            ? std::max(0.0L, result.processEnd[m.current] - now)
-                            : 2 * H;
-                    benefit += (m.status == sim::Status::Idle ? 10.0L : 5.0L) * H
-                             + H / (1.0L + in.duration(lot, j) / H)
-                             - static_cast<long double>(candidate.phaseBias) * H;
-                    benefit -= 0.35L * std::max(0.0L, t - ready);
-                    if (m.output >= 0) benefit -= 4 * H;
-                }
-                last = location(j, route.output);
-            }
-            if (route.output) t += in.tau[last][in.f];
-            return (benefit - 1.5L * t) / (H + t);
-        };
         for (bool output : {false, true}) {
             for (int seed = 0; seed < in.m; ++seed) {
-                if (!eligible(seed, output, output && allowFuture)) continue;
+                if (!phaseEligible(seed, output, output && allowFuture)) continue;
                 sim::PhaseChoice route;
                 route.output = output;
                 route.machines.push_back(seed);
-                long double score = scoreRoute(route);
+                long double score = phaseScoreRoute(k, route);
                 if (score > best.score) {
                     best = route;
                     best.score = score;
+                    best.travel = phaseTravel(k, best);
                 }
                 while (static_cast<int>(route.machines.size()) < batchLimit) {
                     int next = -1;
                     long double nextScore = -std::numeric_limits<long double>::infinity();
                     for (int j = 0; j < in.m; ++j) {
-                        if (!eligible(j, output, false) ||
+                        if (!phaseEligible(j, output, false) ||
                             std::find(route.machines.begin(), route.machines.end(), j)
                                 != route.machines.end()) continue;
                         sim::PhaseChoice trial = route;
                         trial.machines.push_back(j);
-                        long double value = scoreRoute(trial);
+                        long double value = phaseScoreRoute(k, trial);
                         if (value > nextScore) {
                             nextScore = value;
                             next = j;
@@ -717,11 +803,226 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                     if (nextScore > best.score) {
                         best = route;
                         best.score = nextScore;
+                        best.travel = phaseTravel(k, best);
                     }
                 }
             }
         }
+        phaseMasks(best);
         return best;
+    };
+
+    auto phaseCandidates = [&](int k, bool onlyOutput = false) {
+        struct Seed {
+            long double score = -std::numeric_limits<long double>::infinity();
+            long double travel = 0;
+            int machine = -1;
+        };
+        std::vector<sim::PhaseChoice> all;
+        auto addUnique = [&](sim::PhaseChoice route) {
+            phaseMasks(route);
+            for (auto& existing : all) {
+                if (existing.output == route.output && existing.machines == route.machines) {
+                    if (route.score > existing.score) existing = route;
+                    return;
+                }
+            }
+            all.push_back(std::move(route));
+        };
+        for (bool output : {false, true}) {
+            if (onlyOutput && !output) continue;
+            std::vector<Seed> seeds;
+            for (int j = 0; j < in.m; ++j) {
+                if (!phaseEligible(j, output, false)) continue;
+                sim::PhaseChoice route;
+                route.output = output;
+                route.machines.push_back(j);
+                route.score = phaseScoreRoute(k, route);
+                route.travel = phaseTravel(k, route);
+                seeds.push_back({route.score, route.travel, j});
+            }
+            std::sort(seeds.begin(), seeds.end(), [&](const Seed& a, const Seed& b) {
+                if (a.score != b.score) return a.score > b.score;
+                int la = phaseTaskLot(a.machine, output);
+                int lb = phaseTaskLot(b.machine, output);
+                if (in.lots[la].id != in.lots[lb].id) return in.lots[la].id < in.lots[lb].id;
+                return a.machine < b.machine;
+            });
+            if (seeds.size() > 6) seeds.resize(6);
+            for (const Seed& seed : seeds) {
+                sim::PhaseChoice seedRoute;
+                seedRoute.output = output;
+                seedRoute.machines.push_back(seed.machine);
+                seedRoute.score = seed.score;
+                seedRoute.travel = seed.travel;
+                addUnique(seedRoute);
+                if (batchLimit <= 1) continue;
+                std::vector<Seed> add;
+                for (int j = 0; j < in.m; ++j) {
+                    if (j == seed.machine || !phaseEligible(j, output, false)) continue;
+                    sim::PhaseChoice route;
+                    route.output = output;
+                    route.machines = {seed.machine, j};
+                    route.score = phaseScoreRoute(k, route);
+                    route.travel = phaseTravel(k, route);
+                    add.push_back({route.score, route.travel, j});
+                }
+                std::sort(add.begin(), add.end(), [&](const Seed& a, const Seed& b) {
+                    if (a.score != b.score) return a.score > b.score;
+                    int la = phaseTaskLot(a.machine, output);
+                    int lb = phaseTaskLot(b.machine, output);
+                    if (in.lots[la].id != in.lots[lb].id) return in.lots[la].id < in.lots[lb].id;
+                    return a.machine < b.machine;
+                });
+                if (add.size() > 5) add.resize(5);
+                for (const Seed& first : add) {
+                    sim::PhaseChoice two;
+                    two.output = output;
+                    two.machines = {seed.machine, first.machine};
+                    two.score = phaseScoreRoute(k, two);
+                    two.travel = phaseTravel(k, two);
+                    addUnique(two);
+                    if (batchLimit <= 2) continue;
+                    for (const Seed& second : add) {
+                        if (second.machine == first.machine) continue;
+                        sim::PhaseChoice three = two;
+                        three.machines.push_back(second.machine);
+                        three.score = phaseScoreRoute(k, three);
+                        three.travel = phaseTravel(k, three);
+                        addUnique(three);
+                    }
+                }
+            }
+        }
+        result.candidateRoutes += static_cast<long long>(all.size());
+        std::sort(all.begin(), all.end(), phaseRouteLess);
+        std::vector<sim::PhaseChoice> kept;
+        int keptOut = 0;
+        int keptIn = 0;
+        for (auto& route : all) {
+            if (route.output && keptOut >= 2) continue;
+            if (!route.output && keptIn >= 1) continue;
+            route.travel = phaseTravel(k, route);
+            phaseMasks(route);
+            kept.push_back(route);
+            if (route.output) ++keptOut;
+            else ++keptIn;
+        }
+        sim::PhaseChoice fallback = phaseBestChoice(k);
+        if (!fallback.machines.empty() && !(onlyOutput && !fallback.output)) {
+            fallback.travel = phaseTravel(k, fallback);
+            phaseMasks(fallback);
+            bool duplicate = false;
+            for (const auto& route : kept) {
+                if (route.output == fallback.output && route.machines == fallback.machines) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) kept.push_back(fallback);
+        }
+        std::sort(kept.begin(), kept.end(), phaseRouteLess);
+        return kept;
+    };
+
+    auto chooseJointAssignment = [&](const std::vector<int>& freeAgvs,
+                                     const std::vector<std::vector<sim::PhaseChoice>>& options) {
+        int count = static_cast<int>(freeAgvs.size());
+        std::vector<long double> upper(count + 1, 0);
+        for (int d = count - 1; d >= 0; --d) {
+            long double bestPositive = 0;
+            for (const auto& route : options[d])
+                bestPositive = std::max(bestPositive, route.score);
+            upper[d] = upper[d + 1] + bestPositive;
+        }
+        std::vector<int> chosen(count, -1);
+        std::vector<int> bestChosen(count, -1);
+        long double bestScore = 0;
+        long double bestTravel = 0;
+        int bestIdle = count;
+        std::vector<int> bestSignature;
+        long double accScore = 0;
+        long double accTravel = 0;
+        int idleCount = 0;
+        auto leaf = [&]() {
+            std::vector<int> signature;
+            for (int d = 0; d < count; ++d) {
+                int idx = chosen[d];
+                if (idx < 0) {
+                    signature.push_back(-1);
+                } else {
+                    const auto& route = options[d][idx];
+                    signature.push_back(route.output ? 0 : 1);
+                    for (int j : route.machines) signature.push_back(100 + j);
+                }
+            }
+            bool better = accScore > bestScore + 1e-12L;
+            if (!better && std::fabs(accScore - bestScore) <= 1e-12L) {
+                if (accTravel < bestTravel - 1e-12L) better = true;
+                else if (std::fabs(accTravel - bestTravel) <= 1e-12L) {
+                    if (idleCount < bestIdle) better = true;
+                    else if (idleCount == bestIdle && signature < bestSignature) better = true;
+                }
+            }
+            if (better) {
+                bestScore = accScore;
+                bestTravel = accTravel;
+                bestIdle = idleCount;
+                bestChosen = chosen;
+                bestSignature = std::move(signature);
+            }
+        };
+        auto dfs = [&](auto&& self, int depth, std::uint32_t usedIn,
+                       std::uint32_t usedOut) -> void {
+            ++result.dfsNodes;
+            if (accScore + upper[depth] < bestScore - 1e-12L) return;
+            if (depth == count) {
+                leaf();
+                return;
+            }
+            for (int idx = 0; idx < static_cast<int>(options[depth].size()); ++idx) {
+                const auto& route = options[depth][idx];
+                if ((route.inputMask & usedIn) || (route.outputMask & usedOut)) continue;
+                chosen[depth] = idx;
+                accScore += route.score;
+                accTravel += route.travel;
+                self(self, depth + 1, usedIn | route.inputMask, usedOut | route.outputMask);
+                accScore -= route.score;
+                accTravel -= route.travel;
+                chosen[depth] = -1;
+            }
+            ++idleCount;
+            self(self, depth + 1, usedIn, usedOut);
+            --idleCount;
+        };
+        if (count == 1) {
+            if (!options[0].empty()) bestChosen[0] = 0;
+        } else {
+            std::fill(bestSignature.begin(), bestSignature.end(), 0);
+            dfs(dfs, 0, 0, 0);
+        }
+        bool any = false;
+        for (int idx : bestChosen) if (idx >= 0) any = true;
+        if (!any) {
+            int bestDepth = -1;
+            int bestIdx = -1;
+            long double bestVal = -std::numeric_limits<long double>::infinity();
+            for (int d = 0; d < count; ++d) {
+                for (int idx = 0; idx < static_cast<int>(options[d].size()); ++idx) {
+                    if (options[d][idx].score > bestVal) {
+                        bestVal = options[d][idx].score;
+                        bestDepth = d;
+                        bestIdx = idx;
+                    }
+                }
+            }
+            if (bestDepth >= 0) {
+                bestChosen[bestDepth] = bestIdx;
+                any = true;
+            }
+        }
+        if (any) ++result.jointChoicesUsed;
+        return bestChosen;
     };
 
     auto applyPhaseChoice = [&](int k, const sim::PhaseChoice& best) {
@@ -730,8 +1031,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         agv.incoming.clear();
         agv.load.clear();
         long double departure = now;
+        markAgvBusy(k);
         if (best.output) {
             ++result.phaseOutputTrips;
+            result.phaseOutputLots += static_cast<int>(best.machines.size());
             int seed = best.machines.front();
             bool future = machines[seed].output < 0;
             if (future) {
@@ -746,11 +1049,16 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             agv.route.push_back({in.f, sim::Action::DropFinal, -1});
         } else {
             ++result.phaseInputTrips;
+            result.phaseInputLots += static_cast<int>(best.machines.size());
             agv.route.push_back({in.o, sim::Action::PickIn, -1});
             for (int j : best.machines) {
                 auto& m = machines[j];
                 int lot = candidate.sequence[j][m.nextFeed++];
                 m.inputReserved = true;
+                if (starvedSince[j] >= 0) {
+                    result.machineStarvedByMachine[j] += now - starvedSince[j];
+                    starvedSince[j] = -1;
+                }
                 agv.incoming.push_back(lot);
                 agv.route.push_back({in.alpha[j], sim::Action::DropAlpha, lot});
             }
@@ -761,10 +1069,18 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         if (recordLog && agv.position != first)
             result.log.push_back({LogType::Move, k, -1, agv.position, first, departure});
         result.emptyTravel += in.tau[agv.position][first];
+        result.emptyTravelByAgv[k] += in.tau[agv.position][first];
         events.push({departure + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
     };
 
     auto settle = [&]() {
+        int freeCount = 0;
+        for (int k = 0; k < in.K; ++k) if (!agvs[k].active) ++freeCount;
+        if (freeCount > 0) {
+            ++result.dispatchEpochCount;
+            if (freeCount >= 2) ++result.multiFreeEpochCount;
+            result.maxSimultaneouslyFree = std::max(result.maxSimultaneouslyFree, freeCount);
+        }
         for (int j = 0; j < in.m; ++j) {
             if (machines[j].status == sim::Status::Idle && machines[j].input >= 0) {
                 startMachine(j);
@@ -773,6 +1089,84 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         for (int k = 0; k < in.K; ++k) {
             if (agvs[k].active) continue;
             if (candidate.phaseAware) {
+                if (candidate.phaseHardUnblock) {
+                    bool anyBlocked = false;
+                    for (int j = 0; j < in.m; ++j) {
+                        if (machines[j].status == sim::Status::Blocked &&
+                            machines[j].output >= 0 && !machines[j].outputReserved) {
+                            anyBlocked = true;
+                            break;
+                        }
+                    }
+                    if (anyBlocked) {
+                        for (int q = 0; q < in.K; ++q) {
+                            if (agvs[q].active) continue;
+                            std::vector<sim::PhaseChoice> options = phaseCandidates(q, true);
+                            int pick = -1;
+                            for (int idx = 0; idx < static_cast<int>(options.size()); ++idx) {
+                                for (int j : options[idx].machines) {
+                                    if (machines[j].status == sim::Status::Blocked) {
+                                        pick = idx;
+                                        break;
+                                    }
+                                }
+                                if (pick >= 0) break;
+                            }
+                            if (pick >= 0) {
+                                applyPhaseChoice(q, options[pick]);
+                            } else {
+                                sim::PhaseChoice signal = phaseBestChoice(q);
+                                if (signal.output) {
+                                    std::vector<sim::PhaseChoice> out = phaseCandidates(q, true);
+                                    if (!out.empty()) applyPhaseChoice(q, out.front());
+                                    else if (hasInput()) createInputRoute(q);
+                                } else if (hasInput()) {
+                                    createInputRoute(q);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                }
+                if (candidate.phaseOutboundOnly) {
+                    for (int q = 0; q < in.K; ++q) {
+                        if (agvs[q].active) continue;
+                        sim::PhaseChoice signal = phaseBestChoice(q);
+                        if (signal.output) {
+                            std::vector<sim::PhaseChoice> options = phaseCandidates(q, true);
+                            if (!options.empty()) applyPhaseChoice(q, options.front());
+                            else if (hasInput()) createInputRoute(q);
+                        } else if (hasInput()) {
+                            createInputRoute(q);
+                        }
+                    }
+                    continue;
+                }
+                if (candidate.phaseJoint) {
+                    std::vector<int> freeAgvs;
+                    std::vector<std::vector<sim::PhaseChoice>> options;
+                    for (int q = 0; q < in.K; ++q) {
+                        if (agvs[q].active) continue;
+                        freeAgvs.push_back(q);
+                        options.push_back(phaseCandidates(q));
+                    }
+                    if (!freeAgvs.empty()) {
+                        std::vector<int> chosen = chooseJointAssignment(freeAgvs, options);
+                        for (int d = 0; d < static_cast<int>(freeAgvs.size()); ++d) {
+                            int idx = chosen[d];
+                            if (idx >= 0) applyPhaseChoice(freeAgvs[d], options[d][idx]);
+                        }
+                    }
+                    continue;
+                }
+                if (candidate.phaseEnumerated) {
+                    for (int q = 0; q < in.K; ++q) {
+                        if (agvs[q].active) continue;
+                        std::vector<sim::PhaseChoice> options = phaseCandidates(q);
+                        if (!options.empty()) applyPhaseChoice(q, options.front());
+                    }
+                    continue;
+                }
                 if (candidate.phaseGlobal) {
                     std::vector<char> free(in.K, 0);
                     for (int q = 0; q < in.K; ++q) free[q] = agvs[q].active ? 0 : 1;
@@ -830,6 +1224,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             int j = alphaMachine[step.destination];
             machines[j].input = step.lot;
             machines[j].inputReserved = false;
+            if (starvedSince[j] >= 0) {
+                result.machineStarvedByMachine[j] += now - starvedSince[j];
+                starvedSince[j] = -1;
+            }
             agv.load.erase(std::find(agv.load.begin(), agv.load.end(), step.lot));
             if (recordLog) result.log.push_back({LogType::Deliver, k, step.lot, step.destination, -1, now});
         } else if (step.action == sim::Action::PickBeta) {
@@ -842,6 +1240,8 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                 m.current = -1;
                 m.status = sim::Status::Idle;
                 idleSince[j] = now;
+                starvedSince[j] = (m.input < 0 && m.nextFeed < candidate.sequence[j].size())
+                    ? now : -1;
                 m.outputSince = now;
                 result.blockedTime += now - m.blockStart;
                 result.blockedByMachine[j] += now - m.blockStart;
@@ -863,13 +1263,20 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             if (recordLog && agv.position != destination) {
                 result.log.push_back({LogType::Move, k, -1, agv.position, destination, now});
             }
-            if (!agv.load.empty()) result.loadedTravel += in.tau[agv.position][destination];
-            else result.emptyTravel += in.tau[agv.position][destination];
-            events.push({now + in.tau[agv.position][destination] + sim::RELEASE_GUARD, 1, k});
+            long double leg = in.tau[agv.position][destination];
+            if (!agv.load.empty()) {
+                result.loadedTravel += leg;
+                result.loadedTravelByAgv[k] += leg;
+            } else {
+                result.emptyTravel += leg;
+                result.emptyTravelByAgv[k] += leg;
+            }
+            events.push({now + leg + sim::RELEASE_GUARD, 1, k});
         } else {
             agv.active = false;
             agv.route.clear();
             agv.step = 0;
+            markAgvIdle(k);
         }
     };
 
@@ -892,9 +1299,26 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         settle();
     }
 
+    for (int k = 0; k < in.K; ++k) {
+        if (vehicleIdleSince[k] >= 0) {
+            result.idleVehicleTimeByAgv[k] += now - vehicleIdleSince[k];
+            vehicleIdleSince[k] = -1;
+        }
+    }
+    for (int j = 0; j < in.m; ++j) {
+        if (starvedSince[j] >= 0) {
+            result.machineStarvedByMachine[j] += now - starvedSince[j];
+            starvedSince[j] = -1;
+        }
+    }
     if (delivered != in.n) return result;
     long double total = 0;
-    for (long double value : result.completion) total += value;
+    long double makespan = 0;
+    for (long double value : result.completion) {
+        total += value;
+        makespan = std::max(makespan, value);
+    }
+    result.makespan = makespan;
     result.deliveries = delivered;
     result.mean = total / in.n;
     result.feasible = true;

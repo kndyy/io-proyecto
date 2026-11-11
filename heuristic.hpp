@@ -13,7 +13,7 @@
 
 namespace io1 {
 
-enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket };
+enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket, PhaseJoint };
 
 struct Options {
     std::uint64_t seed = 20261106;
@@ -21,6 +21,8 @@ struct Options {
     int maxNeighbors = 40;
     int phaseGlobal = -1;
     int phaseLookahead = 0;
+    int phaseOutboundOnly = 0;
+    int phaseHardUnblock = 0;
 };
 
 struct Outcome {
@@ -47,6 +49,7 @@ inline bool strategyFromName(const std::string& name, Strategy& strategy) {
     else if (name == "integrated") strategy = Strategy::Integrated;
     else if (name == "alns-joint") strategy = Strategy::AlnsJoint;
     else if (name == "phase-bucket") strategy = Strategy::PhaseBucket;
+    else if (name == "phase-joint") strategy = Strategy::PhaseJoint;
     else return false;
     return true;
 }
@@ -66,6 +69,7 @@ inline std::string strategyName(Strategy strategy) {
         case Strategy::Integrated: return "integrated";
         case Strategy::AlnsJoint: return "alns-joint";
         case Strategy::PhaseBucket: return "phase-bucket";
+        case Strategy::PhaseJoint: return "phase-joint";
     }
     return "vnd";
 }
@@ -991,35 +995,20 @@ inline bool phaseImprove(const Instance& in, SearchState& state,
     return changed;
 }
 
-inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) {
-    int budget = std::max(1, options.maxEvals);
-    int initial = std::max(1, budget / 3);
-    Outcome integrated = solveIntegrated(in,
-        Options{options.seed, initial, options.maxNeighbors});
-    Candidate start = integrated.candidate;
-    start.phaseAware = true;
-    start.mixedRoutes = false;
-    start.phaseBias = 0;
-    start.phaseGlobal = options.phaseGlobal == 1;
-    start.phaseLookahead = options.phaseLookahead == 1;
-    SearchState best;
-    best.candidate = start;
-    best.result = simulate(in, start, integrated.batchLimit, false);
-    best.batchLimit = integrated.batchLimit;
-    best.evals = integrated.evals + 1;
-    best.budget = budget - std::min(budget, initial);
-    if (best.budget > 0) --best.budget;
+inline void runPhaseSearch(const Instance& in, SearchState& best, const Options& options) {
     SearchState current = best;
     for (int batch = 1; batch <= in.C; ++batch) {
         for (int bias = -5; bias <= 5; ++bias) {
             for (bool global : {false, true}) {
                 if (options.phaseGlobal >= 0 &&
                     global != (options.phaseGlobal == 1)) continue;
-                Candidate variant = integrated.candidate;
+                Candidate variant = best.candidate;
                 variant.phaseAware = true;
                 variant.mixedRoutes = false;
                 variant.phaseGlobal = global;
                 variant.phaseLookahead = options.phaseLookahead == 1;
+                variant.phaseOutboundOnly = options.phaseOutboundOnly == 1;
+                variant.phaseHardUnblock = options.phaseHardUnblock == 1;
                 variant.phaseBias = bias;
                 phaseTest(in, current, variant, batch);
             }
@@ -1055,11 +1044,35 @@ inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) 
         current.budget = remaining;
         current.evals = evaluated;
     }
+    best.evals = current.evals;
+}
+
+inline Outcome solvePhaseBucketMode(const Instance& in, const Options& options) {
+    int budget = std::max(1, options.maxEvals);
+    int initial = std::max(1, budget / 3);
+    Outcome integrated = solveIntegrated(in,
+        Options{options.seed, initial, options.maxNeighbors});
+    Candidate start = integrated.candidate;
+    start.phaseAware = true;
+    start.mixedRoutes = false;
+    start.phaseBias = 0;
+    start.phaseGlobal = options.phaseGlobal == 1;
+    start.phaseLookahead = options.phaseLookahead == 1;
+    start.phaseOutboundOnly = options.phaseOutboundOnly == 1;
+    start.phaseHardUnblock = options.phaseHardUnblock == 1;
+    SearchState best;
+    best.candidate = start;
+    best.result = simulate(in, start, integrated.batchLimit, false);
+    best.batchLimit = integrated.batchLimit;
+    best.evals = integrated.evals + 1;
+    best.budget = budget - std::min(budget, initial);
+    if (best.budget > 0) --best.budget;
+    runPhaseSearch(in, best, options);
     Outcome outcome;
     outcome.candidate = best.candidate;
     outcome.batchLimit = best.batchLimit;
     outcome.result = simulate(in, best.candidate, best.batchLimit, true);
-    outcome.evals = current.evals;
+    outcome.evals = best.evals;
     outcome.strategy = "phase-bucket";
     return outcome;
 }
@@ -1082,12 +1095,60 @@ inline Outcome solvePhaseBucket(const Instance& in, const Options& options) {
     return solvePhaseBucketMode(in, options);
 }
 
+inline Outcome solvePhaseJoint(const Instance& in, const Options& options) {
+    int total = std::max(1, options.maxEvals);
+    Outcome outcome;
+    outcome.strategy = "phase-joint";
+    if (total < 4) {
+        Candidate start = buildOrdered(in, orderByHeight(in), Assign::Score);
+        start.phaseAware = true;
+        start.mixedRoutes = false;
+        start.phaseGlobal = false;
+        start.phaseLookahead = false;
+        start.phaseEnumerated = true;
+        start.phaseJoint = true;
+        outcome.candidate = start;
+        outcome.batchLimit = in.C;
+        outcome.result = simulate(in, start, in.C, true);
+        outcome.evals = 1;
+        return outcome;
+    }
+    int initial = std::max(1, total / 4);
+    Outcome integrated = solveIntegrated(in,
+        Options{options.seed, initial, options.maxNeighbors, 0, 0});
+    Candidate start = integrated.candidate;
+    start.phaseAware = true;
+    start.mixedRoutes = false;
+    start.phaseGlobal = false;
+    start.phaseLookahead = false;
+    start.phaseOutboundOnly = false;
+    start.phaseHardUnblock = false;
+    start.phaseEnumerated = true;
+    start.phaseJoint = true;
+    SearchState best;
+    best.candidate = start;
+    best.result = simulate(in, start, integrated.batchLimit, false);
+    best.batchLimit = integrated.batchLimit;
+    best.evals = integrated.evals + 1;
+    best.budget = std::max(0, total - static_cast<int>(best.evals));
+    Options searchOptions = options;
+    searchOptions.phaseGlobal = 0;
+    searchOptions.phaseLookahead = 0;
+    runPhaseSearch(in, best, searchOptions);
+    outcome.candidate = best.candidate;
+    outcome.batchLimit = best.batchLimit;
+    outcome.result = simulate(in, best.candidate, best.batchLimit, true);
+    outcome.evals = best.evals;
+    return outcome;
+}
+
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {
     Outcome outcome;
     outcome.strategy = strategyName(strategy);
     if (strategy == Strategy::Integrated) return solveIntegrated(in, options);
     if (strategy == Strategy::AlnsJoint) return solveAlnsJoint(in, options);
     if (strategy == Strategy::PhaseBucket) return solvePhaseBucket(in, options);
+    if (strategy == Strategy::PhaseJoint) return solvePhaseJoint(in, options);
 
     if (strategy == Strategy::B1 || strategy == Strategy::B2 || strategy == Strategy::B3) {
         std::vector<int> order = strategy == Strategy::B2 ? orderByFastest(in) : orderById(in);

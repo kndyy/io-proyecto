@@ -58,6 +58,7 @@ Para cambiar de solución no hace falta recompilar.
 | `integrated` | greedy + ILS con VND `RELOCATE`, `SWAP` y `DISPATCH` | despacho AGV adaptativo |
 | `alns-joint` | ALNS con destrucción/reparación, prioridades por lote y rutas AGV mixtas | experimental |
 | `phase-bucket` | ILS + despacho de AGVs guiado por fase y viajes de longitud adaptativa | por defecto, validada |
+| `phase-joint` | BEJ-AGV: enumeración acotada de rutas completas + asignación conjunta de AGVs | experimental, no promovida |
 
 `phase-bucket` es la estrategia por defecto: superó los diez resultados históricos y los diez TXT fueron aceptados por IO1Lab. `integrated` y `alns-joint` se conservan como comparadores; `alns-joint` es experimental y sus rutas mixtas mostraron bloqueo excesivo. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote.
 
@@ -204,7 +205,7 @@ instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
 selector.conf     selector externo en tiempo de ejecución
-tools/            comparación, generación, validación y diagnóstico
+tools/            comparación, generación, validación, diagnóstico y bench_joint
 instances/        diez instancias oficiales
 materials/        paquete original recibido
 results/          resultados, comparativas y validación en plataforma
@@ -234,6 +235,26 @@ python3 tools/phase_monitor.py --evals 2500 --neighbors 35 --seed 20261109 --out
 ```
 
 El workflow `.github/workflows/phase-monitor.yml` compila, ejecuta los self-tests, compara las diez instancias y guarda CSV/TXT en artefactos temporales de Actions; la corrida diaria es corta y las actualizaciones del código ejecutan una comparación de 50 000 evaluaciones por instancia. **No envían nada a IO1Lab ni hacen commits de resultados.** El monitor diario usa semillas de ejecución variables y retiene los archivos 30 días. La estrategia predeterminada en `selector.conf` es `phase-bucket`. Los diez TXT de 50k fueron enviados con Playwright y aceptados por IO1Lab; la publicación manual no se automatiza.
+
+## Estrategia `phase-joint` (experimental, no promovida)
+
+Implementa BEJ-AGV sobre el simulador existente: enumera rutas completas de 1 a C paradas con un shortlist acotado, conserva la ruta greedy anterior como candidata y resuelve una asignación conjunta de AGVs con branch-and-bound de dos máscaras. No cambia el simulador físico, el TXT ni `selector.conf`.
+
+Resultados de las etapas manuales:
+
+- Ablación con la misma agenda congelada (09, 10, 06, 08 × tres semillas): `R` y `J` fueron peores que `G0`/`G1` en todas las combinaciones; el porcentaje de eventos con más de un AGV libre fue 9–23%.
+- Etapa C (20k) en 09/10: `phase-joint` ganó en 2 de 6 ejecuciones por ≥2%, pero perdió en una y el tiempo fue 8–12× el baseline de igual presupuesto. La compuerta de runtime falla y la de calidad no es consistente.
+- Fallbacks: F1 (solo salidas enumeradas) y F2 (desbloqueo duro) fueron peores en 09/10 a 5k. No se promueve ni se envió nada a IO1Lab.
+
+Diagnóstico reproducible:
+
+```bash
+./io1 --input instances/instancia_09.io1 --dispatch-ablation --seed 20261109
+./io1 --input instances/instancia_09.io1 --strategy phase-joint --seed 20261109 --max-evals 5000 --max-neighbors 120
+python3 tools/bench_joint.py --stage A --output experiments/local
+```
+
+Los resultados crudos quedan en `experiments/local/` (ignorado por git). Las banderas `--phase-outbound-only` y `--phase-hard-unblock` existen solo para las ablaciones de fallback; no son el valor por defecto.
 
 Referencia: Júlia Bergmann, András Kovács y József Váncza, “AGV scheduling in shopfloor logistics of semiconductor assembly”, *Journal of Manufacturing Systems*, 87 (2026), 27–47, DOI: 10.1016/j.jmsy.2026.05.004. La función de prioridad, las vecindades y el bloqueo son adaptaciones del proyecto, no una reproducción exacta del algoritmo del artículo.
 
