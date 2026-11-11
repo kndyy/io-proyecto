@@ -535,6 +535,8 @@ int main(int argc, char** argv) {
                   << " dfs_nodes=" << outcome.result.dfsNodes
                   << " joint_choices=" << outcome.result.jointChoicesUsed
                   << " makespan=" << outcome.result.makespan
+                  << " learned_choices=" << outcome.result.learnedChoiceCount
+                  << " learned_changes=" << outcome.result.learnedChoiceChanges
                   << '\n';
         return outcome.result.feasible ? 0 : 1;
     } catch (const std::exception& error) {

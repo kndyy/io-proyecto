@@ -206,7 +206,7 @@ instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
 selector.conf     selector externo en tiempo de ejecución
-tools/            comparación, validación, diagnóstico, bench_joint y learn_dispatch
+tools/            comparación, validación, diagnóstico, bench_joint, learn_dispatch y rollout_first
 instances/        diez instancias oficiales
 materials/        paquete original recibido
 results/          resultados, comparativas y validación en plataforma
@@ -241,24 +241,28 @@ El workflow `.github/workflows/phase-monitor.yml` compila, ejecuta los self-test
 
 `phase-learned` conserva el generador y la factibilidad de `phase-bucket`, pero reemplaza el ranking de rutas por una combinación lineal de nueve features: score antiguo, bloqueos, máquinas ociosas, viaje vacío/cargado, fill, edad de salidas, espera y exposición. Los pesos se optimizan offline con CEM (`tools/learn_dispatch.cpp`) sobre secuencias congeladas; el buscador ILS/VND existente se reutiliza. El binario carga los pesos con `--policy-file`.
 
-Resultado de la gate A2:
+Resultado de la gate A2 tras corregir el bug de `best.score` en la asignación global:
 
-- CEM global sobre 09/10, snapshots congelados de 5k y de 20k, población 32, élite 8, 25 generaciones.
-- El mejor vector encontrado fue el baseline `{1,0,0,0,0,0,0,0,0}`; el holdout quedó en ratio `1.000` para 09 y 10.
+- Entrenamiento separado: 09 con asignación global y 10 con `auto`; snapshots congelados de 20k, cinco semillas, tres para entrenamiento y dos para holdout.
+- Se midieron las distribuciones de las nueve features, se normalizaron las features 1–8 y se probó cada coeficiente individualmente en `±0.2, ±0.05, ±0.01`.
+- Coordenadas y CEM reparado (64 candidatos, 10 élites, 40 generaciones) mantuvieron el baseline `{1,0,0,0,0,0,0,0,0}` como mejor vector. El holdout dio ratio `1.000` en 09 y 10.
 - No hubo mejora de 1.5% en ninguna de las dos instancias; la gate A2 falla y no se promueve.
-- Los pesos `{1,0,...}` con `phase-learned` reproducen exactamente `phase-bucket` en la regresión de 1k.
+- Los pesos `{1,0,...}` con `phase-learned` reproducen exactamente `phase-bucket` en las regresiones global 0 y global 1 a 1k.
 
-El plan B de rollout selectivo no se implementó en esta iteración; requeriría el refactor de estado clonable y no se justifica mientras A no pase. No se envió nada a IO1Lab.
+Rollout: se probó una versión preliminar de una sola decisión (primer despacho, replay completo desde `t=0`) en `tools/rollout_first.cpp`. No mejoró 09/10; las alternativas fueron iguales o peores. El rollout multievento con estado clonable no se implementó en esta iteración. No se envió nada a IO1Lab.
 
 ```bash
 g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/learn_dispatch.cpp -o learn_dispatch
-./learn_dispatch 20000
+./learn_dispatch 9 20000
+./learn_dispatch 10 20000
 ./io1 --input instances/instancia_09.io1 --strategy phase-learned \
   --seed 20261109 --max-evals 20000 --max-neighbors 120 \
-  --policy-file experiments/local/policy_global.txt
+  --policy-file experiments/local/policy_9.txt
+g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/rollout_first.cpp -o rollout_first
+./rollout_first 9 20261109 5000
 ```
 
-Los resultados de entrenamiento quedan en `experiments/local/` (ignorado por git).
+Los resultados de entrenamiento y rollout quedan en `experiments/local/` (ignorado por git).
 
 ## Estrategia `phase-joint` (experimental, no promovida)
 

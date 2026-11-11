@@ -17,73 +17,95 @@ struct Snapshot {
     Candidate candidate;
     int batchLimit = 1;
     long double baseline = 1;
-    int instanceNumber = 0;
 };
 
 std::array<double, 9> baselineWeights() {
     return {1, 0, 0, 0, 0, 0, 0, 0, 0};
 }
 
-std::vector<Snapshot> freezeSnapshots(int evals, int neighbors) {
+std::vector<Snapshot> generateSnapshots(int number, int evals) {
     std::vector<Snapshot> snapshots;
     const std::array<int, 5> seeds{20261109, 12345, 55555, 10101, 98989};
-    for (int number : {9, 10}) {
-        Instance instance = loadInstance("instances/instancia_" +
-            std::string(number < 10 ? "0" : "") + std::to_string(number) + ".io1");
-        for (int seed : seeds) {
-            Options options;
-            options.seed = seed;
-            options.maxEvals = evals;
-            options.maxNeighbors = neighbors;
-            options.phaseGlobal = 0;
-            options.phaseLookahead = 0;
-            Outcome outcome = solvePhaseBucketMode(instance, options);
-            Candidate candidate = outcome.candidate;
-            candidate.phaseAware = true;
-            candidate.mixedRoutes = false;
-            candidate.phaseGlobal = false;
-            candidate.phaseLookahead = false;
-            candidate.phaseEnumerated = false;
-            candidate.phaseJoint = false;
-            candidate.phaseOutboundOnly = false;
-            candidate.phaseHardUnblock = false;
-            candidate.learnedPolicy = false;
-            Result base = simulate(instance, candidate, outcome.batchLimit, false);
-            snapshots.push_back({instance, candidate, outcome.batchLimit, base.mean, number});
-        }
+    for (int seed : seeds) {
+        std::string name = "instances/instancia_";
+        if (number < 10) name += "0";
+        name += std::to_string(number) + ".io1";
+        Instance instance = loadInstance(name);
+        Options options;
+        options.seed = seed;
+        options.maxEvals = evals;
+        options.maxNeighbors = 120;
+        options.phaseGlobal = number == 9 ? 1 : -1;
+        options.phaseLookahead = 0;
+        Outcome outcome;
+        if (number == 9) outcome = solvePhaseBucketMode(instance, options);
+        else outcome = solvePhaseBucket(instance, options);
+        Candidate candidate = outcome.candidate;
+        candidate.phaseAware = true;
+        candidate.mixedRoutes = false;
+        candidate.phaseLookahead = false;
+        candidate.phaseEnumerated = false;
+        candidate.phaseJoint = false;
+        candidate.phaseOutboundOnly = false;
+        candidate.phaseHardUnblock = false;
+        candidate.learnedPolicy = false;
+        Result base = simulate(instance, candidate, outcome.batchLimit, false);
+        snapshots.push_back({instance, candidate, outcome.batchLimit, base.mean});
     }
     return snapshots;
 }
 
+struct Scales {
+    std::array<double, 9> mean{};
+    std::array<double, 9> sd{1, 1, 1, 1, 1, 1, 1, 1, 1};
+};
+
+Scales featureScales(const std::vector<Snapshot>& train) {
+    Scales scales;
+    std::array<long double, 9> sum{};
+    std::array<long double, 9> square{};
+    long long count = 0;
+    for (const auto& snapshot : train) {
+        Candidate candidate = snapshot.candidate;
+        candidate.learnedPolicy = true;
+        candidate.dispatchWeights = baselineWeights();
+        Result result = simulate(snapshot.instance, candidate, snapshot.batchLimit, false);
+        for (int d = 0; d < 9; ++d) {
+            sum[d] += result.featureSum[d];
+            square[d] += result.featureSquareSum[d];
+        }
+        count += result.featureCount;
+    }
+    for (int d = 1; d < 9; ++d) {
+        if (count == 0) continue;
+        long double m = sum[d] / count;
+        long double variance = square[d] / count - m * m;
+        scales.mean[d] = static_cast<double>(m);
+        double sd = std::sqrt(std::max(1e-12L, variance));
+        scales.sd[d] = sd < 1e-3 ? 1.0 : sd;
+    }
+    return scales;
+}
+
+std::array<double, 9> rawWeights(const std::array<double, 9>& theta, const Scales& scales) {
+    std::array<double, 9> raw = theta;
+    for (int d = 1; d < 9; ++d) raw[d] = theta[d] / scales.sd[d];
+    return raw;
+}
+
 long double evaluate(const std::vector<Snapshot>& snapshots,
-                     const std::array<double, 9>& weights) {
+                     const std::array<double, 9>& theta, const Scales& scales) {
+    std::array<double, 9> raw = rawWeights(theta, scales);
     long double total = 0;
     for (const auto& snapshot : snapshots) {
         Candidate candidate = snapshot.candidate;
         candidate.learnedPolicy = true;
-        candidate.dispatchWeights = weights;
+        candidate.dispatchWeights = raw;
         Result result = simulate(snapshot.instance, candidate, snapshot.batchLimit, false);
         if (!result.feasible) return 1e9L;
         total += result.mean / snapshot.baseline;
     }
     return total / snapshots.size();
-}
-
-long double evaluateInstance(const std::vector<Snapshot>& snapshots,
-                             const std::array<double, 9>& weights, int number) {
-    long double total = 0;
-    int count = 0;
-    for (const auto& snapshot : snapshots) {
-        if (snapshot.instanceNumber != number) continue;
-        Candidate candidate = snapshot.candidate;
-        candidate.learnedPolicy = true;
-        candidate.dispatchWeights = weights;
-        Result result = simulate(snapshot.instance, candidate, snapshot.batchLimit, false);
-        if (!result.feasible) return 1e9L;
-        total += result.mean / snapshot.baseline;
-        ++count;
-    }
-    return total / count;
 }
 
 std::array<double, 9> sample(const std::array<double, 8>& mu,
@@ -97,40 +119,62 @@ std::array<double, 9> sample(const std::array<double, 8>& mu,
 }
 
 int main(int argc, char** argv) {
-    int evals = 20000;
-    if (argc > 1) evals = std::stoi(argv[1]);
+    int number = argc > 1 ? std::stoi(argv[1]) : 9;
+    int evals = argc > 2 ? std::stoi(argv[2]) : 20000;
     std::filesystem::create_directories("experiments/local");
-    std::vector<Snapshot> all = freezeSnapshots(evals, 120);
-    std::vector<Snapshot> trainSet;
-    std::vector<Snapshot> holdoutSet;
-    const std::array<int, 5> seeds{20261109, 12345, 55555, 10101, 98989};
+    std::vector<Snapshot> all = generateSnapshots(number, evals);
+    std::vector<Snapshot> train;
+    std::vector<Snapshot> holdout;
     for (std::size_t i = 0; i < all.size(); ++i) {
-        int seed = seeds[i % seeds.size()];
-        if (seed == 10101 || seed == 98989) holdoutSet.push_back(all[i]);
-        else trainSet.push_back(all[i]);
+        if (i < 3) train.push_back(all[i]);
+        else holdout.push_back(all[i]);
     }
+    Scales scales = featureScales(train);
+    std::array<double, 9> best = baselineWeights();
+    long double bestFitness = evaluate(train, best, scales);
+    std::cout << "baseline fitness " << static_cast<double>(bestFitness) << '\n';
+    std::array<double, 9> coordinateBest = best;
+    long double coordinateFitness = bestFitness;
+    const std::array<double, 7> deltas{-0.2, -0.05, -0.01, 0.0, 0.01, 0.05, 0.2};
+    std::ofstream coordinateCsv("experiments/local/coordinate_" + std::to_string(number) + ".csv");
+    coordinateCsv << "coordinate,value,fitness\n";
+    for (int d = 1; d < 9; ++d) {
+        for (double delta : deltas) {
+            std::array<double, 9> candidate = coordinateBest;
+            candidate[d] = delta;
+            long double fitness = evaluate(train, candidate, scales);
+            coordinateCsv << d << ',' << delta << ',' << static_cast<double>(fitness) << '\n';
+            if (fitness < coordinateFitness) {
+                coordinateFitness = fitness;
+                coordinateBest = candidate;
+            }
+        }
+    }
+    std::cout << "coordinate fitness " << static_cast<double>(coordinateFitness) << '\n';
     std::array<double, 8> mu{};
     std::array<double, 8> sigma{};
     sigma.fill(0.5);
+    for (int i = 0; i < 8; ++i) mu[i] = coordinateBest[i + 1];
     std::mt19937_64 rng(20261109);
-    std::array<double, 9> best = baselineWeights();
-    long double bestFitness = evaluate(trainSet, best);
-    std::ofstream csv("experiments/local/policy_global.csv");
-    csv << "generation,fitness,theta0,theta1,theta2,theta3,theta4,theta5,theta6,theta7,theta8\n";
-    const int population = 32;
-    const int eliteCount = 8;
-    const int generations = 25;
+    std::array<double, 9> cemBest = coordinateBest;
+    long double cemFitness = coordinateFitness;
+    std::ofstream cemCsv("experiments/local/cem_" + std::to_string(number) + ".csv");
+    cemCsv << "generation,fitness,theta0,theta1,theta2,theta3,theta4,theta5,theta6,theta7,theta8\n";
+    const int population = 64;
+    const int eliteCount = 10;
+    const int generations = 40;
     for (int generation = 1; generation <= generations; ++generation) {
         std::vector<std::array<double, 9>> candidates;
         candidates.push_back(baselineWeights());
-        for (int i = 1; i < population; ++i) candidates.push_back(sample(mu, sigma, rng));
+        candidates.push_back(coordinateBest);
+        for (int i = 2; i < population; ++i) candidates.push_back(sample(mu, sigma, rng));
         std::vector<std::pair<long double, int>> scored;
         for (int i = 0; i < population; ++i)
-            scored.push_back({evaluate(trainSet, candidates[i]), i});
+            scored.push_back({evaluate(train, candidates[i], scales), i});
         std::sort(scored.begin(), scored.end());
-        if (scored.front().first < bestFitness) {
-            bestFitness = scored.front().first;
-            best = candidates[scored.front().second];
+        if (scored.front().first < cemFitness) {
+            cemFitness = scored.front().first;
+            cemBest = candidates[scored.front().second];
         }
         std::array<double, 8> eliteMean{};
         std::array<double, 8> eliteSd{};
@@ -149,23 +193,27 @@ int main(int argc, char** argv) {
             mu[i] = std::clamp(0.7 * mu[i] + 0.3 * eliteMean[i], -3.0, 3.0);
             sigma[i] = std::max(0.05, 0.7 * sigma[i] + 0.3 * eliteSd[i]);
         }
-        csv << generation << ',' << static_cast<double>(bestFitness);
-        for (double value : best) csv << ',' << value;
-        csv << '\n';
-        std::cout << "generation " << generation << " best " << static_cast<double>(bestFitness)
-                  << '\n';
+        cemCsv << generation << ',' << static_cast<double>(cemFitness);
+        for (double value : cemBest) cemCsv << ',' << value;
+        cemCsv << '\n';
+        std::cout << "generation " << generation << " best "
+                  << static_cast<double>(cemFitness) << '\n';
     }
-    std::ofstream policy("experiments/local/policy_global.txt");
-    for (double value : best) policy << value << ' ';
+    std::array<double, 9> raw = rawWeights(cemBest, scales);
+    std::ofstream policy("experiments/local/policy_" + std::to_string(number) + ".txt");
+    for (double value : raw) policy << value << ' ';
     policy << '\n';
+    std::ofstream summary("experiments/local/policy_" + std::to_string(number) + ".csv");
+    summary << "feature,mean,sd,cem_theta,raw_weight\n";
+    for (int d = 0; d < 9; ++d)
+        summary << d << ',' << scales.mean[d] << ',' << scales.sd[d] << ','
+                << cemBest[d] << ',' << raw[d] << '\n';
     std::cout << "holdout\n";
-    for (int number : {9, 10}) {
-        std::array<double, 9> baseline = baselineWeights();
-        long double baseRatio = evaluateInstance(holdoutSet, baseline, number);
-        long double learnedRatio = evaluateInstance(holdoutSet, best, number);
-        std::cout << number << " baseline " << static_cast<double>(baseRatio)
-                  << " learned " << static_cast<double>(learnedRatio)
-                  << " ratio " << static_cast<double>(learnedRatio / baseRatio) << '\n';
-    }
+    long double baseHold = evaluate(holdout, baselineWeights(), scales);
+    long double coordHold = evaluate(holdout, coordinateBest, scales);
+    long double cemHold = evaluate(holdout, cemBest, scales);
+    std::cout << "baseline " << static_cast<double>(baseHold)
+              << " coordinate " << static_cast<double>(coordHold)
+              << " cem " << static_cast<double>(cemHold) << '\n';
     return 0;
 }
