@@ -1,11 +1,11 @@
-instance,objective_average,diagnostic,achieved_at_utc,public_best,gap_vs_public_pct,submission_file,method,config
-01,346.227260000,FEASIBLE,2026-11-09T19:43:39.396088+00:00,327.1137,5.843,proposed_submissions/instancia_01.txt,phase-bucket,auto 50k
-02,441.583800000,FEASIBLE,2026-11-09T18:45:57.329497+00:00,412.6585,7.010,proposed_submissions/instancia_02.txt,phase-bucket,id 50k
-03,525.007200000,FEASIBLE,2026-11-09T19:44:01.221731+00:00,483.0249,8.692,proposed_submissions/instancia_03.txt,phase-bucket,global 50k
-04,572.034800000,FEASIBLE,2026-11-09T19:44:22.991806+00:00,528.4404,8.250,proposed_submissions/instancia_04.txt,phase-bucket,global 50k
-05,654.515440000,FEASIBLE,2026-11-09T18:47:02.750081+00:00,606.0450,7.998,proposed_submissions/instancia_05.txt,phase-bucket,id 50k
-06,903.308840000,FEASIBLE,2026-11-09T19:44:44.728748+00:00,760.2939,18.810,proposed_submissions/instancia_06.txt,phase-bucket,global 50k
-07,1091.329600000,FEASIBLE,2026-11-09T19:50:53.315119+00:00,905.6949,20.496,proposed_submissions/instancia_07.txt,phase-bucket,global 100k
-08,1295.649900000,FEASIBLE,2026-11-09T18:48:08.045971+00:00,1077.9824,20.192,proposed_submissions/instancia_08.txt,phase-bucket,id 50k
-09,1294.265700000,FEASIBLE,2026-11-09T19:45:28.275481+00:00,989.9936,30.735,proposed_submissions/instancia_09.txt,phase-bucket,global 50k
-10,1308.171100000,FEASIBLE,2026-11-09T19:51:15.156967+00:00,1001.9073,30.568,proposed_submissions/instancia_10.txt,phase-bucket,id 100k
+instance,objective_average,diagnostic,achieved_at_utc,public_best,gap_vs_public_pct,submission_file,method,config,seed,phase_lookahead
+01,337.409100000,FEASIBLE,2026-11-11T16:05:27.975030+00:00,326.6046,3.308,proposed_submissions/instancia_01.txt,phase-bucket,auto 50k,20261109,1
+02,438.204400000,FEASIBLE,2026-11-11T16:05:49.734137+00:00,404.0021,8.466,proposed_submissions/instancia_02.txt,phase-bucket,auto 50k,20261109,1
+03,520.894700000,FEASIBLE,2026-11-11T16:27:03.851507+00:00,475.9221,9.450,proposed_submissions/instancia_03.txt,phase-bucket,auto 50k,55555,0
+04,565.953300000,FEASIBLE,2026-11-11T16:06:11.465432+00:00,525.9226,7.612,proposed_submissions/instancia_04.txt,phase-bucket,auto 50k,20261109,1
+05,654.515440000,FEASIBLE,2026-11-09T18:47:02.750081+00:00,591.3411,10.683,proposed_submissions/instancia_05.txt,phase-bucket,id 50k,20261109,0
+06,902.497000000,FEASIBLE,2026-11-11T16:10:20.487508+00:00,754.2413,19.656,proposed_submissions/instancia_06.txt,phase-bucket,auto 50k,20261109,1
+07,1073.423300000,FEASIBLE,2026-11-11T16:10:42.273299+00:00,901.9320,19.014,proposed_submissions/instancia_07.txt,phase-bucket,auto 50k,20261109,1
+08,1294.215200000,FEASIBLE,2026-11-11T16:11:04.072855+00:00,1077.9824,20.059,proposed_submissions/instancia_08.txt,phase-bucket,auto 50k,20261109,1
+09,1273.710400000,FEASIBLE,2026-11-11T16:23:20.108228+00:00,958.7442,32.852,proposed_submissions/instancia_09.txt,phase-bucket,global 500k,20261109,0
+10,1300.108300000,FEASIBLE,2026-11-11T16:23:41.895801+00:00,993.2925,30.889,proposed_submissions/instancia_10.txt,phase-bucket,auto 50k,12345,0

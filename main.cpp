@@ -24,6 +24,7 @@ struct Config {
     int maxEvals = 1000;
     int maxNeighbors = 40;
     int phaseGlobal = -1;
+    int phaseLookahead = 0;
     bool selfTest = false;
     bool listStrategies = false;
     bool help = false;
@@ -67,6 +68,9 @@ void loadSelector(const std::string& path, Config& config) {
             if (value == "auto") config.phaseGlobal = -1;
             else config.phaseGlobal = std::stoi(value) == 0 ? 0 : 1;
         }
+        else if (key == "phase_lookahead") {
+            config.phaseLookahead = std::stoi(value) == 0 ? 0 : 1;
+        }
     }
 }
 
@@ -78,10 +82,12 @@ Config parseArguments(int argc, char** argv) {
     bool hasMaxEvals = false;
     bool hasMaxNeighbors = false;
     bool hasPhaseGlobal = false;
+    bool hasPhaseLookahead = false;
     std::uint64_t seed = 0;
     int maxEvals = 0;
     int maxNeighbors = 0;
     int phaseGlobal = -1;
+    int phaseLookahead = 0;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -104,6 +110,7 @@ Config parseArguments(int argc, char** argv) {
             else phaseGlobal = std::stoi(v) == 0 ? 0 : 1;
             hasPhaseGlobal = true;
         }
+        else if (arg == "--phase-lookahead") { phaseLookahead = std::stoi(value()) == 0 ? 0 : 1; hasPhaseLookahead = true; }
         else if (arg == "--self-test") config.selfTest = true;
         else if (arg == "--list-strategies") config.listStrategies = true;
         else if (arg == "--help" || arg == "-h") config.help = true;
@@ -120,6 +127,7 @@ Config parseArguments(int argc, char** argv) {
     if (hasMaxEvals) config.maxEvals = maxEvals;
     if (hasMaxNeighbors) config.maxNeighbors = maxNeighbors;
     if (hasPhaseGlobal) config.phaseGlobal = phaseGlobal;
+    if (hasPhaseLookahead) config.phaseLookahead = phaseLookahead;
     return config;
 }
 
@@ -329,7 +337,7 @@ void printUsage() {
     std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--txt <envio.txt>]\n"
               << "       [--from-txt <envio_previo.txt>] [--selector <archivo>]\n"
               << "       [--strategy <nombre>] [--seed <entero>] [--max-evals <entero>]\n"
-              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>]\n"
+              << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>]\n"
               << "       [--self-test] [--list-strategies]\n";
 }
 
@@ -367,7 +375,7 @@ int main(int argc, char** argv) {
         }
 
         Instance in = loadInstance(config.input);
-        Options options{config.seed, config.maxEvals, config.maxNeighbors, config.phaseGlobal};
+        Options options{config.seed, config.maxEvals, config.maxNeighbors, config.phaseGlobal, config.phaseLookahead};
         auto begin = std::chrono::steady_clock::now();
         Outcome outcome;
         if (!config.fromTxt.empty()) {
