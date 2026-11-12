@@ -128,6 +128,13 @@ struct Result {
     std::vector<long double> loadedTravelByAgv;
     std::vector<long double> idleVehicleTimeByAgv;
     std::vector<long double> machineStarvedByMachine;
+    std::vector<int> inputTripsByAgv;
+    std::vector<int> outputTripsByAgv;
+    std::vector<int> inputLotsByAgv;
+    std::vector<int> outputLotsByAgv;
+    std::vector<long double> inboundPickup;
+    std::vector<long double> alphaDelivery;
+    std::vector<long double> betaPickup;
     long long dispatchEpochCount = 0;
     long long multiFreeEpochCount = 0;
     int maxSimultaneouslyFree = 0;
@@ -253,6 +260,13 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
     result.loadedTravelByAgv.assign(in.K, 0);
     result.idleVehicleTimeByAgv.assign(in.K, 0);
     result.machineStarvedByMachine.assign(in.m, 0);
+    result.inputTripsByAgv.assign(in.K, 0);
+    result.outputTripsByAgv.assign(in.K, 0);
+    result.inputLotsByAgv.assign(in.K, 0);
+    result.outputLotsByAgv.assign(in.K, 0);
+    result.inboundPickup.assign(in.n, std::numeric_limits<long double>::infinity());
+    result.alphaDelivery.assign(in.n, std::numeric_limits<long double>::infinity());
+    result.betaPickup.assign(in.n, std::numeric_limits<long double>::infinity());
 
     std::vector<sim::Machine> machines(in.m);
     std::vector<sim::Agv> agvs(in.K);
@@ -406,6 +420,8 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         markAgvBusy(k);
         ++result.phaseInputTrips;
         result.phaseInputLots += static_cast<int>(lots.size());
+        ++result.inputTripsByAgv[k];
+        result.inputLotsByAgv[k] += static_cast<int>(lots.size());
         if (recordLog && agv.position != in.o) {
             result.log.push_back({LogType::Move, k, -1, agv.position, in.o, now});
         }
@@ -480,6 +496,8 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         markAgvBusy(k);
         ++result.phaseOutputTrips;
         result.phaseOutputLots += static_cast<int>(lots.size());
+        ++result.outputTripsByAgv[k];
+        result.outputLotsByAgv[k] += static_cast<int>(lots.size());
         int first = in.beta[chosen.front()];
         if (recordLog && agv.position != first) {
             result.log.push_back({LogType::Move, k, -1, agv.position, first, now});
@@ -1272,6 +1290,8 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         if (best.output) {
             ++result.phaseOutputTrips;
             result.phaseOutputLots += static_cast<int>(best.machines.size());
+            ++result.outputTripsByAgv[k];
+            result.outputLotsByAgv[k] += static_cast<int>(best.machines.size());
             int seed = best.machines.front();
             bool future = machines[seed].output < 0;
             if (future) {
@@ -1287,6 +1307,8 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         } else {
             ++result.phaseInputTrips;
             result.phaseInputLots += static_cast<int>(best.machines.size());
+            ++result.inputTripsByAgv[k];
+            result.inputLotsByAgv[k] += static_cast<int>(best.machines.size());
             agv.route.push_back({in.o, sim::Action::PickIn, -1});
             for (int j : best.machines) {
                 auto& m = machines[j];
@@ -1624,6 +1646,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         auto& agv = agvs[k];
         sim::Step step = agv.route[agv.step];
         if (step.action == sim::Action::PickIn) {
+            for (int lot : agv.incoming) result.inboundPickup[lot] = now;
             if (recordLog) {
                 for (int lot : agv.incoming) {
                     result.log.push_back({LogType::Pickup, k, lot, in.o, -1, now});
@@ -1635,6 +1658,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             int j = alphaMachine[step.destination];
             machines[j].input = step.lot;
             machines[j].inputReserved = false;
+            result.alphaDelivery[step.lot] = now;
             if (starvedSince[j] >= 0) {
                 result.machineStarvedByMachine[j] += now - starvedSince[j];
                 starvedSince[j] = -1;
@@ -1658,6 +1682,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                 result.blockedByMachine[j] += now - m.blockStart;
             }
             agv.load.push_back(step.lot);
+            result.betaPickup[step.lot] = now;
             if (recordLog) result.log.push_back({LogType::Pickup, k, step.lot, step.destination, -1, now});
         } else {
             for (int lot : agv.load) {

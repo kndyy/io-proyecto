@@ -148,6 +148,25 @@ Estos valores son la mejor solución aceptada por instancia en la plataforma, no
 
 La comparación completa está en `results/alns_joint_comparison.csv` y el análisis en `ALGORITMO_ALNS_RUTAS_MIXTAS.md`. El diagnóstico es que el decoder de rutas mixtas aumenta el bloqueo de `β`; más evaluaciones no cierran la brecha. La ablación del mismo ALNS con el decoder histórico sí mejora ligeramente, así que el siguiente trabajo debe centrarse en la política de AGVs, no en más iteraciones.
 
+## Depuración detallada
+
+`--debug-dir` escribe artefactos de depuración sin cambiar el objetivo ni el TXT:
+
+```bash
+./io1 --input instances/instancia_09.io1 --strategy phase-bucket \
+  --max-evals 5000 --phase-global 0 --debug-dir experiments/local/debug_09
+```
+
+Archivos generados:
+
+- `summary.csv`: media, suma, makespan, percentiles, utilización de máquinas y AGVs, viajes vacíos/cargados, bloqueo, starvation, fill y contadores de búsqueda.
+- `lots.csv`: por lote, tiempos de pickup, alpha, proceso, beta y entrega, con transporte, esperas y flujo total.
+- `machines.csv`: busy, idle, initial idle, gaps, blocked, starved, tail y utilización por máquina.
+- `agvs.csv`: viaje cargado/vacío, idle, utilización, viajes por AGV, lotes transportados y tamaño medio de batch.
+- `events.csv`: log completo de PROCESS, PICKUP, DELIVER y MOVE con recurso, lote, ubicaciones y tiempo.
+
+La instrumentación es de solo lectura: no modifica rutas, reservas, objetivo ni formato de exportación.
+
 ## Diagnóstico de factibilidad
 
 El checker rechazó el primer envío con:

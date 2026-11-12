@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -19,6 +20,7 @@ struct Config {
     std::string input;
     std::string output;
     std::string txt;
+    std::string debugDir;
     std::string fromTxt;
     std::string selector;
     std::string strategy = "vnd";
@@ -115,6 +117,7 @@ Config parseArguments(int argc, char** argv) {
         if (arg == "--input") config.input = value();
         else if (arg == "--out") config.output = value();
         else if (arg == "--txt") config.txt = value();
+        else if (arg == "--debug-dir") config.debugDir = value();
         else if (arg == "--from-txt") config.fromTxt = value();
         else if (arg == "--selector") config.selector = value();
         else if (arg == "--strategy") { strategy = value(); hasStrategy = true; }
@@ -424,12 +427,203 @@ void runDispatchAblation(const Instance& in, const Config& config) {
     }
 }
 
+std::string debugLocation(const Instance& in, int index) {
+    if (index == in.o) return "o";
+    if (index == in.f) return "f";
+    for (int j = 0; j < in.m; ++j) {
+        if (index == in.alpha[j]) return "a" + std::to_string(j + 1);
+    }
+    for (int j = 0; j < in.m; ++j) {
+        if (index == in.beta[j]) return "b" + std::to_string(j + 1);
+    }
+    return in.locationNames[index];
+}
+
+std::string debugNumber(long double value) {
+    if (!std::isfinite(value)) return "NA";
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(6) << value;
+    return stream.str();
+}
+
+long double debugPercentile(std::vector<long double> values, long double q) {
+    if (values.empty()) return 0;
+    std::sort(values.begin(), values.end());
+    long double position = q * (values.size() - 1);
+    std::size_t low = static_cast<std::size_t>(std::floor(position));
+    std::size_t high = static_cast<std::size_t>(std::ceil(position));
+    if (low == high) return values[low];
+    long double weight = position - low;
+    return values[low] * (1 - weight) + values[high] * weight;
+}
+
+void writeDebugReport(const Instance& in, const Outcome& outcome, const std::string& directory) {
+    std::filesystem::create_directories(directory);
+    const Result& result = outcome.result;
+    std::vector<int> machineOf(in.n, -1);
+    std::vector<int> positionOf(in.n, -1);
+    for (int j = 0; j < in.m; ++j) {
+        for (std::size_t p = 0; p < outcome.candidate.sequence[j].size(); ++p) {
+            int lot = outcome.candidate.sequence[j][p];
+            machineOf[lot] = j;
+            positionOf[lot] = static_cast<int>(p);
+        }
+    }
+    std::vector<long double> completions;
+    for (long double value : result.completion)
+        if (std::isfinite(value)) completions.push_back(value);
+    long double sum = 0;
+    for (long double value : completions) sum += value;
+    long double machineBusy = 0;
+    std::vector<std::vector<long double>> starts(in.m), ends(in.m);
+    for (int lot = 0; lot < in.n; ++lot) {
+        int j = machineOf[lot];
+        if (j < 0) continue;
+        starts[j].push_back(result.processStart[lot]);
+        ends[j].push_back(result.processEnd[lot]);
+        machineBusy += result.processEnd[lot] - result.processStart[lot];
+    }
+    long double starved = 0;
+    for (long double value : result.machineStarvedByMachine) starved += value;
+    long double loaded = 0, empty = 0;
+    for (long double value : result.loadedTravelByAgv) loaded += value;
+    for (long double value : result.emptyTravelByAgv) empty += value;
+    long double makespan = result.makespan;
+    {
+        std::ofstream file(std::filesystem::path(directory) / "summary.csv");
+        file << "key,value\n"
+             << "strategy," << outcome.strategy << '\n'
+             << "feasible," << (result.feasible ? 1 : 0) << '\n'
+             << "n," << in.n << "\nm," << in.m << "\nK," << in.K << "\nC," << in.C << '\n'
+             << "evals," << outcome.evals << '\n'
+             << "batch_limit," << outcome.batchLimit << '\n'
+             << "mean," << debugNumber(result.mean) << '\n'
+             << "sum_completion," << debugNumber(sum) << '\n'
+             << "makespan," << debugNumber(makespan) << '\n'
+             << "min_completion," << debugNumber(completions.empty() ? 0 : *std::min_element(completions.begin(), completions.end())) << '\n'
+             << "p50_completion," << debugNumber(debugPercentile(completions, 0.50L)) << '\n'
+             << "p90_completion," << debugNumber(debugPercentile(completions, 0.90L)) << '\n'
+             << "p95_completion," << debugNumber(debugPercentile(completions, 0.95L)) << '\n'
+             << "p99_completion," << debugNumber(debugPercentile(completions, 0.99L)) << '\n'
+             << "max_completion," << debugNumber(completions.empty() ? 0 : *std::max_element(completions.begin(), completions.end())) << '\n'
+             << "machine_busy," << debugNumber(machineBusy) << '\n'
+             << "machine_idle," << debugNumber(makespan * in.m - machineBusy) << '\n'
+             << "machine_util_pct," << debugNumber(makespan > 0 ? 100 * machineBusy / (makespan * in.m) : 0) << '\n'
+             << "machine_starved," << debugNumber(starved) << '\n'
+             << "blocked_time," << debugNumber(result.blockedTime) << '\n'
+             << "blocked_count," << result.blockedCount << '\n'
+             << "loaded_travel," << debugNumber(loaded) << '\n'
+             << "empty_travel," << debugNumber(empty) << '\n'
+             << "empty_share_pct," << debugNumber(loaded + empty > 0 ? 100 * empty / (loaded + empty) : 0) << '\n'
+             << "agv_util_pct," << debugNumber(makespan > 0 ? 100 * (loaded + empty) / (makespan * in.K) : 0) << '\n'
+             << "input_trips," << result.phaseInputTrips << '\n'
+             << "output_trips," << result.phaseOutputTrips << '\n'
+             << "input_lots," << result.phaseInputLots << '\n'
+             << "output_lots," << result.phaseOutputLots << '\n'
+             << "input_fill," << debugNumber(result.phaseInputTrips > 0 ? static_cast<long double>(result.phaseInputLots) / (result.phaseInputTrips * in.C) : 0) << '\n'
+             << "output_fill," << debugNumber(result.phaseOutputTrips > 0 ? static_cast<long double>(result.phaseOutputLots) / (result.phaseOutputTrips * in.C) : 0) << '\n'
+             << "dispatch_epochs," << result.dispatchEpochCount << '\n'
+             << "multi_free_epochs," << result.multiFreeEpochCount << '\n'
+             << "max_free," << result.maxSimultaneouslyFree << '\n'
+             << "candidate_routes," << result.candidateRoutes << '\n'
+             << "dfs_nodes," << result.dfsNodes << '\n'
+             << "joint_choices," << result.jointChoicesUsed << '\n'
+             << "learned_choices," << result.learnedChoiceCount << '\n'
+             << "learned_changes," << result.learnedChoiceChanges << '\n';
+    }
+    {
+        std::ofstream file(std::filesystem::path(directory) / "lots.csv");
+        file << "lot_id,type,quantity,machine_id,sequence_position,inbound_pickup,alpha_delivery,"
+                "process_start,process_end,beta_pickup,delivery,alpha_transport,alpha_wait,"
+                "process_duration,beta_wait,outbound_time,total_flow\n";
+        for (int lot = 0; lot < in.n; ++lot) {
+            long double pStart = result.processStart[lot];
+            long double pEnd = result.processEnd[lot];
+            long double delivery = result.completion[lot];
+            long double alpha = result.alphaDelivery[lot];
+            long double beta = result.betaPickup[lot];
+            long double inbound = result.inboundPickup[lot];
+            file << in.lots[lot].id << ',' << in.lots[lot].type << ',' << debugNumber(in.lots[lot].quantity)
+                 << ',' << machineOf[lot] + 1 << ',' << positionOf[lot] << ','
+                 << debugNumber(inbound) << ',' << debugNumber(alpha) << ','
+                 << debugNumber(pStart) << ',' << debugNumber(pEnd) << ','
+                 << debugNumber(beta) << ',' << debugNumber(delivery) << ','
+                 << debugNumber(alpha - inbound) << ',' << debugNumber(pStart - alpha) << ','
+                 << debugNumber(pEnd - pStart) << ',' << debugNumber(beta - pEnd) << ','
+                 << debugNumber(delivery - beta) << ',' << debugNumber(delivery) << '\n';
+        }
+    }
+    {
+        std::ofstream file(std::filesystem::path(directory) / "machines.csv");
+        file << "machine_id,lots,busy,idle,util_pct,initial_idle,gaps,blocked,starved,tail,"
+                "process_count,first_start,last_end\n";
+        for (int j = 0; j < in.m; ++j) {
+            std::vector<std::pair<long double, long double>> intervals;
+            for (std::size_t p = 0; p < starts[j].size(); ++p) intervals.push_back({starts[j][p], ends[j][p]});
+            std::sort(intervals.begin(), intervals.end());
+            long double busy = 0, gaps = 0;
+            for (std::size_t p = 0; p < intervals.size(); ++p) {
+                busy += intervals[p].second - intervals[p].first;
+                if (p > 0) gaps += std::max(0.0L, intervals[p].first - intervals[p - 1].second);
+            }
+            long double first = intervals.empty() ? 0 : intervals.front().first;
+            long double last = intervals.empty() ? 0 : intervals.back().second;
+            long double tail = makespan - last;
+            file << j + 1 << ',' << intervals.size() << ',' << debugNumber(busy) << ','
+                 << debugNumber(makespan - busy) << ','
+                 << debugNumber(makespan > 0 ? 100 * busy / makespan : 0) << ','
+                 << debugNumber(first) << ',' << debugNumber(gaps) << ','
+                 << debugNumber(result.blockedByMachine[j]) << ','
+                 << debugNumber(result.machineStarvedByMachine[j]) << ','
+                 << debugNumber(tail) << ',' << intervals.size() << ','
+                 << debugNumber(first) << ',' << debugNumber(last) << '\n';
+        }
+    }
+    {
+        std::ofstream file(std::filesystem::path(directory) / "agvs.csv");
+        file << "agv_id,loaded_travel,empty_travel,travel,idle_time,travel_util_pct,"
+                "empty_share_pct,input_trips,output_trips,input_lots,output_lots,"
+                "avg_input_batch,avg_output_batch\n";
+        for (int k = 0; k < in.K; ++k) {
+            long double l = result.loadedTravelByAgv[k];
+            long double e = result.emptyTravelByAgv[k];
+            int inTrips = result.inputTripsByAgv[k];
+            int outTrips = result.outputTripsByAgv[k];
+            file << k + 1 << ',' << debugNumber(l) << ',' << debugNumber(e) << ','
+                 << debugNumber(l + e) << ',' << debugNumber(result.idleVehicleTimeByAgv[k]) << ','
+                 << debugNumber(makespan > 0 ? 100 * (l + e) / makespan : 0) << ','
+                 << debugNumber(l + e > 0 ? 100 * e / (l + e) : 0) << ','
+                 << inTrips << ',' << outTrips << ','
+                 << result.inputLotsByAgv[k] << ',' << result.outputLotsByAgv[k] << ','
+                 << debugNumber(inTrips > 0 ? static_cast<long double>(result.inputLotsByAgv[k]) / inTrips : 0) << ','
+                 << debugNumber(outTrips > 0 ? static_cast<long double>(result.outputLotsByAgv[k]) / outTrips : 0) << '\n';
+        }
+    }
+    {
+        std::ofstream file(std::filesystem::path(directory) / "events.csv");
+        file << "type,resource,resource_index,lot,from_location,to_location,start\n";
+        for (const LogEvent& event : result.log) {
+            std::string type;
+            std::string resource;
+            int resourceIndex = 0;
+            if (event.type == LogType::Process) { type = "PROCESS"; resource = "M"; resourceIndex = event.resource + 1; }
+            else { type = event.type == LogType::Pickup ? "PICKUP" : event.type == LogType::Deliver ? "DELIVER" : "MOVE"; resource = "AGV"; resourceIndex = event.resource + 1; }
+            file << type << ',' << resource << ',' << resourceIndex << ','
+                 << (event.lot >= 0 ? std::to_string(in.lots[event.lot].id) : "") << ','
+                 << (event.from >= 0 ? debugLocation(in, event.from) : "") << ','
+                 << (event.to >= 0 ? debugLocation(in, event.to) : "") << ','
+                 << debugNumber(event.start) << '\n';
+        }
+    }
+}
+
 void printUsage() {
     std::cout << "uso: io1 --input <archivo.io1> [--out <resultado.csv>] [--txt <envio.txt>]\n"
               << "       [--from-txt <envio_previo.txt>] [--selector <archivo>]\n"
               << "       [--strategy <nombre>] [--seed <entero>] [--max-evals <entero>]\n"
               << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>]\n"
               << "       [--phase-outbound-only <0|1>] [--phase-hard-unblock <0|1>] [--policy-file <archivo>]\n"
+              << "       [--debug-dir <directorio>]\n"
               << "       [--self-test] [--list-strategies] [--dispatch-ablation]\n";
 }
 
@@ -501,6 +695,9 @@ int main(int argc, char** argv) {
         }
         if (outcome.result.feasible && !config.txt.empty()) {
             writeTxt(in, outcome, config.txt);
+        }
+        if (outcome.result.feasible && !config.debugDir.empty()) {
+            writeDebugReport(in, outcome, config.debugDir);
         }
 
         std::cout << "RESULT instance=" << stem(config.input)
