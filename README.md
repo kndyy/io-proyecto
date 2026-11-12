@@ -206,7 +206,8 @@ instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
 selector.conf     selector externo en tiempo de ejecución
-tools/            comparación, validación, diagnóstico, bench_joint, learn_dispatch y rollout_first
+tools/            comparación, validación, diagnóstico, bench_joint, learn_dispatch,
+                  rollout_first, counterfactual y key_ablation
 instances/        diez instancias oficiales
 materials/        paquete original recibido
 results/          resultados, comparativas y validación en plataforma
@@ -263,6 +264,46 @@ g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/rollout_first.cpp -o rollo
 ```
 
 Los resultados de entrenamiento y rollout quedan en `experiments/local/` (ignorado por git).
+
+## Oráculo contrafactual y gate Q0
+
+El simulador expone `DispatchAudit` y `DispatchOverride` opcionales. La traza solo se activa para candidatos `phase-bucket` y no altera la simulación normal. `tools/counterfactual_dispatch.cpp` congela una agenda, elige acciones críticas, reejecuta desde `t=0` con una sola acción sustituida y escribe filas de resultados; `tools/bench_counterfactual.py` ejecuta la matriz.
+
+Verificación:
+
+- Traza contra simulación normal: media y vector de finalizaciones idénticos a `1e-9` en las 32 agendas congeladas.
+- El control que fuerza la acción baseline reproduce exactamente la agenda original.
+- Un override inválido (AGV o fingerprint incorrectos) se rechaza explícitamente y no se reporta como alternativo.
+- Todas las alternativas ejecutadas fueron factibles.
+
+Resultados del gate Q0:
+
+| Etapa | Snapshots | Alternativas válidas | Mejoras ≥0.5% | Semillas con mejora (09 / 10) | Bandas (09 / 10) | Veredicto |
+|---|---:|---:|---:|---:|---|---|
+| 5k | 20 | 1196 | 5 | 0/5 / 1/5 | ninguna / 1,9,11 | FAIL |
+| 20k | 12 | 720 | 0 | 0/3 / 0/3 | ninguna / ninguna | FAIL |
+
+El gate exige 3 de 5 semillas con ≥0.5% en cada instancia y dos bandas; no se cumple. No se implementa el rollout con clonación de estado. Los CSV quedan en `experiments/local/q0_5k_final/` y `experiments/local/q0_20k_final/` (ignorados por git).
+
+## Fallback K1 — transporte por claves
+
+Se añadió la puntuación opt-in por claves por lote y una ablación de 120 vectores aleatorios por semilla/modo sobre agendas congeladas. Las claves neutras reproducen exactamente `phase-bucket`.
+
+| Instancia | Semillas con mejor candidato ≥0.5% | Mejor ganancia |
+|---|---:|---:|
+| 09 | 0/5 | 0.098% |
+| 10 | 1/5 | 0.619% |
+
+K1 exige 3 de 5 semillas; falla. No se implementó la búsqueda memética completa ni se expuso `phase-keys` como estrategia; el selector y los TXT aceptados permanecen intactos. Resultados locales en `experiments/local/key_ablation_final.csv`.
+
+Comandos:
+
+```bash
+g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/counterfactual_dispatch.cpp -o /tmp/io1-counterfactual
+python3 tools/bench_counterfactual.py --freeze-evals 5000 --output experiments/local/q0_5k_final
+g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/key_ablation.cpp -o /tmp/key_ablation
+/tmp/key_ablation --instance 09 --seed 20261109 --freeze-evals 5000 --mode 0 --samples 120 --strength 0.75
+```
 
 ## Estrategia `phase-joint` (experimental, no promovida)
 
