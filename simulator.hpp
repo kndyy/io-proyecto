@@ -19,6 +19,43 @@ struct RecordedRoute {
     long double score = 0;
 };
 
+struct DispatchAction {
+    long long index = -1;
+    long double time = 0;
+    int agv = -1;
+    bool output = false;
+    std::vector<int> machines;
+};
+
+struct DispatchSnapshot {
+    DispatchAction chosen;
+    int freeAgvs = 0;
+    int readyOutputs = 0;
+    int blockedMachines = 0;
+    int waitingInputs = 0;
+    long double accumulatedBlockedTime = 0;
+    std::vector<DispatchAction> alternatives;
+    std::uint64_t prefixFingerprint = 0;
+};
+
+struct DispatchOverride {
+    bool enabled = false;
+    long long targetIndex = -1;
+    int agv = -1;
+    bool output = false;
+    std::vector<int> machines;
+    std::uint64_t expectedPrefixFingerprint = 0;
+};
+
+struct DispatchAudit {
+    std::vector<DispatchSnapshot> trace;
+    bool overrideTargetSeen = false;
+    bool overrideApplied = false;
+    bool overrideRejected = false;
+    std::string rejectionReason;
+    long long totalActions = 0;
+};
+
 struct Candidate {
     std::vector<std::vector<int>> sequence;
     bool adaptive = false;
@@ -35,6 +72,10 @@ struct Candidate {
     bool phaseHardUnblock = false;
     bool learnedPolicy = false;
     std::array<double, 9> dispatchWeights{1, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool transportKeysActive = false;
+    std::vector<float> transportInputKeys;
+    std::vector<float> transportOutputKeys;
+    float transportKeyStrength = 0.75f;
     bool collectFirst = false;
     bool forcedFirst = false;
     int forcedAgv = -1;
@@ -166,8 +207,43 @@ struct PhaseChoice {
 
 }
 
+inline void dispatchHashMix(std::uint64_t& hash, std::uint64_t value) {
+    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+}
+
+inline std::uint64_t dispatchFingerprint(const Instance& in,
+                                         const std::vector<sim::Machine>& machines,
+                                         const std::vector<sim::Agv>& agvs,
+                                         long long index, long double time,
+                                         int agv, bool output,
+                                         const std::vector<int>& route) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    dispatchHashMix(hash, static_cast<std::uint64_t>(index));
+    long long quantized = static_cast<long long>(std::llround(time * 1e9L));
+    dispatchHashMix(hash, static_cast<std::uint64_t>(quantized));
+    for (int k = 0; k < in.K; ++k) {
+        dispatchHashMix(hash, static_cast<std::uint64_t>(k));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(agvs[k].position));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(agvs[k].active ? 1 : 0));
+    }
+    for (int j = 0; j < in.m; ++j) {
+        dispatchHashMix(hash, static_cast<std::uint64_t>(static_cast<int>(machines[j].status)));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(machines[j].input + 1));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(machines[j].output + 1));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(machines[j].current + 1));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(machines[j].nextFeed));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(machines[j].inputReserved ? 1 : 0));
+        dispatchHashMix(hash, static_cast<std::uint64_t>(machines[j].outputReserved ? 1 : 0));
+    }
+    dispatchHashMix(hash, static_cast<std::uint64_t>(agv + 1));
+    dispatchHashMix(hash, static_cast<std::uint64_t>(output ? 1 : 0));
+    for (int j : route) dispatchHashMix(hash, static_cast<std::uint64_t>(j + 1));
+    return hash;
+}
+
 inline Result simulate(const Instance& in, const Candidate& candidate, int batchLimit,
-                       bool recordLog = true) {
+                       bool recordLog = true, DispatchAudit* audit = nullptr,
+                       const DispatchOverride* override = nullptr) {
     Result result;
     result.completion.assign(in.n, std::numeric_limits<long double>::infinity());
     result.processStart.assign(in.n, std::numeric_limits<long double>::infinity());
@@ -196,6 +272,10 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
     std::vector<long double> starvedSince(in.m, 0);
     int dispatchEpoch = 0;
     bool firstDispatchDone = false;
+    long long actionIndex = 0;
+    const bool purePhaseBucket = candidate.phaseAware && !candidate.learnedPolicy &&
+        !candidate.phaseJoint && !candidate.phaseEnumerated &&
+        !candidate.phaseOutboundOnly && !candidate.phaseHardUnblock;
 
     auto markAgvBusy = [&](int k) {
         if (vehicleIdleSince[k] >= 0) {
@@ -774,7 +854,23 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
             last = phaseLocation(j, route.output);
         }
         if (route.output) t += in.tau[last][in.f];
-        return (benefit - 1.5L * t) / (H + t);
+        long double score = (benefit - 1.5L * t) / (H + t);
+        if (candidate.transportKeysActive && !route.machines.empty()) {
+            long double keySum = 0;
+            for (int j : route.machines) {
+                int lot = -1;
+                if (route.output) lot = machines[j].output >= 0 ? machines[j].output : -1;
+                else lot = candidate.sequence[j][machines[j].nextFeed];
+                if (lot >= 0) {
+                    const auto& keys = route.output ? candidate.transportOutputKeys
+                                                     : candidate.transportInputKeys;
+                    if (lot < static_cast<int>(keys.size())) keySum += 2.0L * keys[lot] - 1.0L;
+                }
+            }
+            score += static_cast<long double>(candidate.transportKeyStrength) *
+                     keySum / route.machines.size();
+        }
+        return score;
     };
     auto phaseTaskLot = [&](int j, bool output) {
         return output ? machines[j].output : candidate.sequence[j][machines[j].nextFeed];
@@ -1214,6 +1310,115 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
         events.push({departure + in.tau[agv.position][first] + sim::RELEASE_GUARD, 1, k});
     };
 
+    auto dispatchPhase = [&](int k, const sim::PhaseChoice& route) {
+        DispatchAction intended{actionIndex, now, k, route.output, route.machines};
+        DispatchSnapshot snapshot;
+        if (purePhaseBucket && audit != nullptr) {
+            snapshot.chosen = intended;
+            for (int q = 0; q < in.K; ++q) if (!agvs[q].active) ++snapshot.freeAgvs;
+            for (int j = 0; j < in.m; ++j) {
+                const auto& m = machines[j];
+                if (m.output >= 0 && !m.outputReserved) ++snapshot.readyOutputs;
+                if (m.status == sim::Status::Blocked) ++snapshot.blockedMachines;
+                if (m.input < 0 && !m.inputReserved &&
+                    m.nextFeed < candidate.sequence[j].size()) ++snapshot.waitingInputs;
+            }
+            snapshot.accumulatedBlockedTime = result.blockedTime;
+            std::vector<sim::PhaseChoice> raw = phaseGeneratedChoices(k);
+            std::vector<DispatchAction> alternatives;
+            auto valid = [&](bool output, const std::vector<int>& machinesList) {
+                if (machinesList.empty() ||
+                    static_cast<int>(machinesList.size()) > batchLimit) return false;
+                for (std::size_t i = 0; i < machinesList.size(); ++i) {
+                    int j = machinesList[i];
+                    if (j < 0 || j >= in.m || !phaseEligible(j, output, false)) return false;
+                    for (std::size_t h = 0; h < i; ++h)
+                        if (machinesList[h] == j) return false;
+                }
+                return true;
+            };
+            for (auto& choice : raw) {
+                if (choice.output == route.output && choice.machines == route.machines) continue;
+                if (!valid(choice.output, choice.machines)) continue;
+                bool duplicate = false;
+                for (const auto& existing : alternatives)
+                    if (existing.output == choice.output &&
+                        existing.machines == choice.machines) duplicate = true;
+                if (!duplicate)
+                    alternatives.push_back({-1, now, k, choice.output, choice.machines});
+            }
+            std::sort(alternatives.begin(), alternatives.end(),
+                      [&](const DispatchAction& a, const DispatchAction& b) {
+                sim::PhaseChoice ra;
+                ra.output = a.output;
+                ra.machines = a.machines;
+                sim::PhaseChoice rb;
+                rb.output = b.output;
+                rb.machines = b.machines;
+                long double sa = phaseScoreRoute(k, ra);
+                long double sb = phaseScoreRoute(k, rb);
+                if (sa != sb) return sa > sb;
+                if (a.output != b.output) return a.output;
+                return a.machines < b.machines;
+            });
+            if (alternatives.size() > 3) alternatives.resize(3);
+            if (alternatives.size() >= 2) {
+                bool anyOpposite = false;
+                for (const auto& a : alternatives) if (a.output != route.output) anyOpposite = true;
+                int same = 0;
+                for (const auto& a : alternatives) if (a.output == route.output) ++same;
+                if (anyOpposite && same == 3) {
+                    for (const auto& a : alternatives) {
+                        if (a.output != route.output) {
+                            alternatives[2] = a;
+                            break;
+                        }
+                    }
+                }
+            }
+            snapshot.alternatives = alternatives;
+            snapshot.prefixFingerprint = dispatchFingerprint(in, machines, agvs, actionIndex,
+                now, k, route.output, route.machines);
+            audit->trace.push_back(std::move(snapshot));
+        }
+        if (override != nullptr && override->enabled && purePhaseBucket &&
+            override->targetIndex == actionIndex) {
+            if (audit != nullptr) audit->overrideTargetSeen = true;
+            std::uint64_t fingerprint = dispatchFingerprint(in, machines, agvs, actionIndex,
+                now, k, route.output, route.machines);
+            bool valid = override->agv == k && override->expectedPrefixFingerprint == fingerprint;
+            if (valid) {
+                if (override->machines.empty() ||
+                    static_cast<int>(override->machines.size()) > batchLimit) valid = false;
+                for (std::size_t i = 0; valid && i < override->machines.size(); ++i) {
+                    int j = override->machines[i];
+                    if (j < 0 || j >= in.m ||
+                        !phaseEligible(j, override->output, false)) valid = false;
+                    for (std::size_t h = 0; h < i; ++h)
+                        if (override->machines[h] == j) valid = false;
+                }
+            }
+            if (!valid) {
+                if (audit != nullptr) {
+                    audit->overrideRejected = true;
+                    audit->rejectionReason = "agv, fingerprint or route invalid";
+                }
+            } else {
+                sim::PhaseChoice forced;
+                forced.output = override->output;
+                forced.machines = override->machines;
+                applyPhaseChoice(k, forced);
+                if (audit != nullptr) audit->overrideApplied = true;
+                ++actionIndex;
+                if (audit != nullptr) audit->totalActions = actionIndex;
+                return;
+            }
+        }
+        applyPhaseChoice(k, route);
+        ++actionIndex;
+        if (audit != nullptr) audit->totalActions = actionIndex;
+    };
+
     auto settle = [&]() {
         int freeCount = 0;
         for (int k = 0; k < in.K; ++k) if (!agvs[k].active) ++freeCount;
@@ -1283,14 +1488,14 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                                 }
                             }
                             if (bestK < 0) break;
-                            applyPhaseChoice(bestK, bestChoice);
+                            dispatchPhase(bestK, bestChoice);
                             free[bestK] = 0;
                         }
                     } else {
                         for (int q = 0; q < in.K; ++q) {
                             if (agvs[q].active) continue;
                             sim::PhaseChoice choice = phaseLearnedChoice(q);
-                            if (!choice.machines.empty()) applyPhaseChoice(q, choice);
+                            if (!choice.machines.empty()) dispatchPhase(q, choice);
                         }
                     }
                     continue;
@@ -1319,12 +1524,12 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                                 if (pick >= 0) break;
                             }
                             if (pick >= 0) {
-                                applyPhaseChoice(q, options[pick]);
+                                dispatchPhase(q, options[pick]);
                             } else {
                                 sim::PhaseChoice signal = phaseBestChoice(q);
                                 if (signal.output) {
                                     std::vector<sim::PhaseChoice> out = phaseCandidates(q, true);
-                                    if (!out.empty()) applyPhaseChoice(q, out.front());
+                                    if (!out.empty()) dispatchPhase(q, out.front());
                                     else if (hasInput()) createInputRoute(q);
                                 } else if (hasInput()) {
                                     createInputRoute(q);
@@ -1340,7 +1545,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                         sim::PhaseChoice signal = phaseBestChoice(q);
                         if (signal.output) {
                             std::vector<sim::PhaseChoice> options = phaseCandidates(q, true);
-                            if (!options.empty()) applyPhaseChoice(q, options.front());
+                            if (!options.empty()) dispatchPhase(q, options.front());
                             else if (hasInput()) createInputRoute(q);
                         } else if (hasInput()) {
                             createInputRoute(q);
@@ -1360,7 +1565,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                         std::vector<int> chosen = chooseJointAssignment(freeAgvs, options);
                         for (int d = 0; d < static_cast<int>(freeAgvs.size()); ++d) {
                             int idx = chosen[d];
-                            if (idx >= 0) applyPhaseChoice(freeAgvs[d], options[d][idx]);
+                            if (idx >= 0) dispatchPhase(freeAgvs[d], options[d][idx]);
                         }
                     }
                     continue;
@@ -1369,7 +1574,7 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                     for (int q = 0; q < in.K; ++q) {
                         if (agvs[q].active) continue;
                         std::vector<sim::PhaseChoice> options = phaseCandidates(q);
-                        if (!options.empty()) applyPhaseChoice(q, options.front());
+                        if (!options.empty()) dispatchPhase(q, options.front());
                     }
                     continue;
                 }
@@ -1391,14 +1596,14 @@ inline Result simulate(const Instance& in, const Candidate& candidate, int batch
                             }
                         }
                         if (bestK < 0) break;
-                        applyPhaseChoice(bestK, bestChoice);
+                        dispatchPhase(bestK, bestChoice);
                         free[bestK] = 0;
                     }
                 } else {
                     for (int q = 0; q < in.K; ++q) {
                         if (agvs[q].active) continue;
                         sim::PhaseChoice choice = phaseBestChoice(q);
-                        if (!choice.machines.empty()) applyPhaseChoice(q, choice);
+                        if (!choice.machines.empty()) dispatchPhase(q, choice);
                     }
                 }
                 continue;
