@@ -291,7 +291,7 @@ Se añadió la puntuación opt-in por claves por lote y una ablación de 120 vec
 
 | Instancia | Semillas con mejor candidato ≥0.5% | Mejor ganancia |
 |---|---:|---:|
-| 09 | 0/5 | 0.098% |
+| 09 | 0/5 | 0.000% |
 | 10 | 1/5 | 0.619% |
 
 K1 exige 3 de 5 semillas; falla. No se implementó la búsqueda memética completa ni se expuso `phase-keys` como estrategia; el selector y los TXT aceptados permanecen intactos. Resultados locales en `experiments/local/key_ablation_final.csv`.
