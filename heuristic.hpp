@@ -1,6 +1,6 @@
 #pragma once
 
-#include "simulator.hpp"
+#include "search_types.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,27 +13,7 @@
 
 namespace io1 {
 
-enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket, PhaseJoint, PhaseLearned };
-
-struct Options {
-    std::uint64_t seed = 20261106;
-    int maxEvals = 1000;
-    int maxNeighbors = 40;
-    int phaseGlobal = -1;
-    int phaseLookahead = 0;
-    int phaseOutboundOnly = 0;
-    int phaseHardUnblock = 0;
-    bool learnedPolicy = false;
-    std::array<double, 9> dispatchWeights{1, 0, 0, 0, 0, 0, 0, 0, 0};
-};
-
-struct Outcome {
-    Candidate candidate;
-    Result result;
-    int batchLimit = 1;
-    long long evals = 0;
-    std::string strategy;
-};
+enum class Strategy { B1, B2, B3, S0, S1, S2, Vnd, VndS0, VndS1, VndS2, Integrated, AlnsJoint, PhaseBucket, PhaseJoint, PhaseLearned, TransportSearch };
 
 enum class Assign { Fastest, Score, Balance };
 
@@ -53,6 +33,7 @@ inline bool strategyFromName(const std::string& name, Strategy& strategy) {
     else if (name == "phase-bucket") strategy = Strategy::PhaseBucket;
     else if (name == "phase-joint") strategy = Strategy::PhaseJoint;
     else if (name == "phase-learned") strategy = Strategy::PhaseLearned;
+    else if (name == "transport-search") strategy = Strategy::TransportSearch;
     else return false;
     return true;
 }
@@ -74,6 +55,7 @@ inline std::string strategyName(Strategy strategy) {
         case Strategy::PhaseBucket: return "phase-bucket";
         case Strategy::PhaseJoint: return "phase-joint";
         case Strategy::PhaseLearned: return "phase-learned";
+        case Strategy::TransportSearch: return "transport-search";
     }
     return "vnd";
 }
@@ -1158,6 +1140,8 @@ inline Outcome solvePhaseLearned(const Instance& in, const Options& options) {
     return outcome;
 }
 
+inline Outcome solveTransportStrategy(const Instance& in, const Options& options);
+
 inline Outcome solve(const Instance& in, Strategy strategy, const Options& options) {
     Outcome outcome;
     outcome.strategy = strategyName(strategy);
@@ -1166,6 +1150,7 @@ inline Outcome solve(const Instance& in, Strategy strategy, const Options& optio
     if (strategy == Strategy::PhaseBucket) return solvePhaseBucket(in, options);
     if (strategy == Strategy::PhaseJoint) return solvePhaseJoint(in, options);
     if (strategy == Strategy::PhaseLearned) return solvePhaseLearned(in, options);
+    if (strategy == Strategy::TransportSearch) return solveTransportStrategy(in, options);
 
     if (strategy == Strategy::B1 || strategy == Strategy::B2 || strategy == Strategy::B3) {
         std::vector<int> order = strategy == Strategy::B2 ? orderByFastest(in) : orderById(in);
@@ -1227,6 +1212,23 @@ inline Outcome solve(const Instance& in, Strategy strategy, const Options& optio
     outcome.result = best.result;
     outcome.batchLimit = best.batchLimit;
     return outcome;
+}
+
+}
+
+#include "transport.hpp"
+
+namespace io1 {
+
+inline Outcome solveTransportStrategy(const Instance& in, const Options& options) {
+    Options initial = options;
+    initial.maxEvals = std::max(1, options.maxEvals / (options.phaseGlobal < 0 ? 10 : 5));
+    Outcome seed = solvePhaseBucket(in, initial);
+    Options remaining = options;
+    remaining.maxEvals = std::max(1, options.maxEvals - static_cast<int>(seed.evals));
+    Outcome out = solveTransport(in, transportPlan(in, seed), remaining);
+    out.evals += seed.evals;
+    return out;
 }
 
 }

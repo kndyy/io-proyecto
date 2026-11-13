@@ -1,0 +1,11 @@
+instance,construction_or_history,last_winning_seed,last_search_budget,temperature,cycle,last_search_flags,provenance
+01,phase warm start and direct search,20261109,500000,0.5,50000,,first transport campaign
+02,slots then milk run then warm polishing,11,3000000,0.3,100000,--transport-assignment --transport-window 12,experiments/local/target_dp_small
+03,cold slot assignment weight 1,202,1500000,0.3,50000,--transport-start slots --transport-start-weight 1 --transport-assignment --transport-window 12,experiments/local/target_cold_small
+04,phase warm start and successive direct improvements,20261121,5000000,0.1,50000,--transport-assignment --transport-request-scan --transport-window 12,experiments/local/target_request_small
+05,slots followed by assignment polishing,20261115,300000,0.05,50000,--transport-assignment,experiments/local/target_assignment_v1
+06,SPT and milk run 1 followed by warm improvements,20261123,5000000,0.3,250000,--transport-assignment --transport-lns --transport-destroy 8 --transport-repair 96,experiments/local/target_joint_lns
+07,SPT and milk run 1 followed by warm improvements,20261123,5000000,0.3,250000,--transport-assignment --transport-lns --transport-destroy 8 --transport-repair 96,experiments/local/target_joint_lns
+08,SPT and adaptive milk run 6 followed by warm polishing,55555,5000000,0.1,100000,--transport-assignment,experiments/local/target_deep_polish
+09,slots weight 0.75 and adaptive milk run 6 followed by warm improvements,20261123,5000000,0.3,250000,--transport-assignment --transport-lns --transport-destroy 8 --transport-repair 96,experiments/local/target_joint_lns
+10,SPT and adaptive milk run 6 followed by warm polishing,55555,5000000,0.1,100000,--transport-assignment,experiments/local/target_deep_polish

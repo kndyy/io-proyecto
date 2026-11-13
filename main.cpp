@@ -32,6 +32,25 @@ struct Config {
     int phaseOutboundOnly = 0;
     int phaseHardUnblock = 0;
     std::string policyFile;
+    std::string transportTrace;
+    long double transportTemperature = 0.5L;
+    int transportCycle = 50000;
+    bool transportFixedMachines = false;
+    bool transportLns = false;
+    int transportDestroy = 4;
+    int transportRepair = 32;
+    std::string transportStart = "phase";
+    long double transportStartWeight = 0;
+    bool transportAssignment = false;
+    bool transportJobs = false;
+    int transportRebuild = 0;
+    bool transportSpt = false;
+    int transportWindow = 0;
+    int transportProfile = 0;
+    bool transportRequestScan = false;
+    bool transportFractional = false;
+    int transportSeedBias = 99;
+    int transportSeedBatch = 0;
     std::array<double, 9> dispatchWeights{1, 0, 0, 0, 0, 0, 0, 0, 0};
     bool selfTest = false;
     bool listStrategies = false;
@@ -119,6 +138,25 @@ Config parseArguments(int argc, char** argv) {
         else if (arg == "--txt") config.txt = value();
         else if (arg == "--debug-dir") config.debugDir = value();
         else if (arg == "--from-txt") config.fromTxt = value();
+        else if (arg == "--transport-trace") config.transportTrace = value();
+        else if (arg == "--transport-temperature") config.transportTemperature = std::stold(value());
+        else if (arg == "--transport-cycle") config.transportCycle = std::stoi(value());
+        else if (arg == "--transport-fixed-machines") config.transportFixedMachines = true;
+        else if (arg == "--transport-lns") config.transportLns = true;
+        else if (arg == "--transport-destroy") config.transportDestroy = std::stoi(value());
+        else if (arg == "--transport-repair") config.transportRepair = std::stoi(value());
+        else if (arg == "--transport-start") config.transportStart = value();
+        else if (arg == "--transport-start-weight") config.transportStartWeight = std::stold(value());
+        else if (arg == "--transport-assignment") config.transportAssignment = true;
+        else if (arg == "--transport-jobs") config.transportJobs = true;
+        else if (arg == "--transport-rebuild") config.transportRebuild = std::stoi(value());
+        else if (arg == "--transport-spt") config.transportSpt = true;
+        else if (arg == "--transport-window") config.transportWindow = std::stoi(value());
+        else if (arg == "--transport-profile") config.transportProfile = std::stoi(value());
+        else if (arg == "--transport-request-scan") config.transportRequestScan = true;
+        else if (arg == "--transport-fractional") config.transportFractional = true;
+        else if (arg == "--transport-seed-bias") config.transportSeedBias = std::stoi(value());
+        else if (arg == "--transport-seed-batch") config.transportSeedBatch = std::stoi(value());
         else if (arg == "--selector") config.selector = value();
         else if (arg == "--strategy") { strategy = value(); hasStrategy = true; }
         else if (arg == "--seed") { seed = std::stoull(value()); hasSeed = true; }
@@ -460,6 +498,7 @@ long double debugPercentile(std::vector<long double> values, long double q) {
 void writeDebugReport(const Instance& in, const Outcome& outcome, const std::string& directory) {
     std::filesystem::create_directories(directory);
     const Result& result = outcome.result;
+    const bool dispatchMetrics = outcome.strategy != "transport-search";
     std::vector<int> machineOf(in.n, -1);
     std::vector<int> positionOf(in.n, -1);
     for (int j = 0; j < in.m; ++j) {
@@ -493,6 +532,7 @@ void writeDebugReport(const Instance& in, const Outcome& outcome, const std::str
         std::ofstream file(std::filesystem::path(directory) / "summary.csv");
         file << "key,value\n"
              << "strategy," << outcome.strategy << '\n'
+             << "dispatch_metrics_available," << (dispatchMetrics ? 1 : 0) << '\n'
              << "feasible," << (result.feasible ? 1 : 0) << '\n'
              << "n," << in.n << "\nm," << in.m << "\nK," << in.K << "\nC," << in.C << '\n'
              << "evals," << outcome.evals << '\n'
@@ -516,12 +556,12 @@ void writeDebugReport(const Instance& in, const Outcome& outcome, const std::str
              << "empty_travel," << debugNumber(empty) << '\n'
              << "empty_share_pct," << debugNumber(loaded + empty > 0 ? 100 * empty / (loaded + empty) : 0) << '\n'
              << "agv_util_pct," << debugNumber(makespan > 0 ? 100 * (loaded + empty) / (makespan * in.K) : 0) << '\n'
-             << "input_trips," << result.phaseInputTrips << '\n'
-             << "output_trips," << result.phaseOutputTrips << '\n'
-             << "input_lots," << result.phaseInputLots << '\n'
-             << "output_lots," << result.phaseOutputLots << '\n'
-             << "input_fill," << debugNumber(result.phaseInputTrips > 0 ? static_cast<long double>(result.phaseInputLots) / (result.phaseInputTrips * in.C) : 0) << '\n'
-             << "output_fill," << debugNumber(result.phaseOutputTrips > 0 ? static_cast<long double>(result.phaseOutputLots) / (result.phaseOutputTrips * in.C) : 0) << '\n'
+             << "input_trips," << (dispatchMetrics ? std::to_string(result.phaseInputTrips) : "") << '\n'
+             << "output_trips," << (dispatchMetrics ? std::to_string(result.phaseOutputTrips) : "") << '\n'
+             << "input_lots," << (dispatchMetrics ? std::to_string(result.phaseInputLots) : std::to_string(in.n)) << '\n'
+             << "output_lots," << (dispatchMetrics ? std::to_string(result.phaseOutputLots) : std::to_string(in.n)) << '\n'
+             << "input_fill," << (dispatchMetrics ? debugNumber(result.phaseInputTrips > 0 ? static_cast<long double>(result.phaseInputLots) / (result.phaseInputTrips * in.C) : 0) : "") << '\n'
+             << "output_fill," << (dispatchMetrics ? debugNumber(result.phaseOutputTrips > 0 ? static_cast<long double>(result.phaseOutputLots) / (result.phaseOutputTrips * in.C) : 0) : "") << '\n'
              << "dispatch_epochs," << result.dispatchEpochCount << '\n'
              << "multi_free_epochs," << result.multiFreeEpochCount << '\n'
              << "max_free," << result.maxSimultaneouslyFree << '\n'
@@ -593,10 +633,10 @@ void writeDebugReport(const Instance& in, const Outcome& outcome, const std::str
                  << debugNumber(l + e) << ',' << debugNumber(result.idleVehicleTimeByAgv[k]) << ','
                  << debugNumber(makespan > 0 ? 100 * (l + e) / makespan : 0) << ','
                  << debugNumber(l + e > 0 ? 100 * e / (l + e) : 0) << ','
-                 << inTrips << ',' << outTrips << ','
+                 << (inTrips >= 0 ? std::to_string(inTrips) : "") << ',' << (outTrips >= 0 ? std::to_string(outTrips) : "") << ','
                  << result.inputLotsByAgv[k] << ',' << result.outputLotsByAgv[k] << ','
-                 << debugNumber(inTrips > 0 ? static_cast<long double>(result.inputLotsByAgv[k]) / inTrips : 0) << ','
-                 << debugNumber(outTrips > 0 ? static_cast<long double>(result.outputLotsByAgv[k]) / outTrips : 0) << '\n';
+                 << (inTrips >= 0 ? debugNumber(inTrips > 0 ? static_cast<long double>(result.inputLotsByAgv[k]) / inTrips : 0) : "") << ','
+                 << (outTrips >= 0 ? debugNumber(outTrips > 0 ? static_cast<long double>(result.outputLotsByAgv[k]) / outTrips : 0) : "") << '\n';
         }
     }
     {
@@ -624,6 +664,19 @@ void printUsage() {
               << "       [--max-neighbors <entero>] [--phase-global <auto|0|1>] [--phase-lookahead <0|1>]\n"
               << "       [--phase-outbound-only <0|1>] [--phase-hard-unblock <0|1>] [--policy-file <archivo>]\n"
               << "       [--debug-dir <directorio>]\n"
+              << "       [--transport-trace <csv>] [--transport-temperature <real>] [--transport-cycle <entero>]\n"
+              << "       [--transport-fixed-machines]\n"
+              << "       [--transport-lns] [--transport-destroy <entero>] [--transport-repair <entero>]\n"
+              << "       [--transport-start <phase|slots>] [--transport-start-weight <real>]\n"
+              << "       [--transport-assignment]\n"
+              << "       [--transport-jobs]\n"
+              << "       [--transport-rebuild <0..6>]\n"
+              << "       [--transport-spt]\n"
+              << "       [--transport-window <0..16>]\n"
+              << "       [--transport-profile <0|1|2>]\n"
+              << "       [--transport-request-scan]\n"
+              << "       [--transport-fractional]\n"
+              << "       [--transport-seed-bias <-5|-2|0|2|5>] [--transport-seed-batch <entero>]\n"
               << "       [--self-test] [--list-strategies] [--dispatch-ablation]\n";
 }
 
@@ -636,7 +689,7 @@ int main(int argc, char** argv) {
         }
         if (config.listStrategies) {
             for (const char* name : {"b1", "b2", "b3", "s0", "s1", "s2",
-                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint", "phase-bucket", "phase-joint", "phase-learned"}) {
+                                     "vnd", "vnd-s0", "vnd-s1", "vnd-s2", "integrated", "alns-joint", "phase-bucket", "phase-joint", "phase-learned", "transport-search"}) {
                 std::cout << name << '\n';
             }
             return 0;
@@ -663,7 +716,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        Strategy strategy;
+        Strategy strategy = Strategy::PhaseBucket;
         if (!strategyFromName(config.strategy, strategy)) {
             std::cerr << "estrategia desconocida: " << config.strategy << '\n';
             return 1;
@@ -675,7 +728,53 @@ int main(int argc, char** argv) {
         options.dispatchWeights = config.dispatchWeights;
         auto begin = std::chrono::steady_clock::now();
         Outcome outcome;
-        if (!config.fromTxt.empty()) {
+        if (config.strategy == "transport-search") {
+            TransportPlan start;
+            long long seedEvals = 0;
+            if (!config.fromTxt.empty()) start = loadTransportPlan(in, config.fromTxt);
+            else {
+                Options initial = options;
+                initial.maxEvals = std::max(1, options.maxEvals / (options.phaseGlobal < 0 ? 10 : 5));
+                Outcome seed;
+                if (config.transportStart == "phase") seed = solvePhaseBucket(in, initial);
+                else if (config.transportStart == "slots")
+                    seed = slotTransportSeed(in, options, config.transportStartWeight,
+                                             config.transportSeedBias, config.transportSeedBatch);
+                else throw std::runtime_error("inicio de transporte desconocido");
+                start = transportPlan(in, seed);
+                seedEvals = seed.evals;
+            }
+            Options remaining = options;
+            if (config.transportSpt) sortTransportLots(in, start);
+            if (config.transportRebuild != 0) {
+                if (config.transportRebuild < 1 || config.transportRebuild > 6) throw std::runtime_error("reconstruccion desconocida");
+                int lag = config.transportRebuild >= 5 ? 0 : (config.transportRebuild - 1) % 2 + 1;
+                bool global = config.transportRebuild == 3 || config.transportRebuild == 4 || config.transportRebuild == 6;
+                if (config.transportProfile < 0 || config.transportProfile > 2) throw std::runtime_error("perfil de transporte desconocido");
+                start = buildMilkPlan(in, start.machines, lag, config.seed, global, config.transportProfile);
+            }
+            remaining.maxEvals = std::max(1, options.maxEvals - static_cast<int>(seedEvals));
+            std::ofstream trace;
+            if (!config.transportTrace.empty()) {
+                trace.open(config.transportTrace);
+                if (!trace) throw std::runtime_error("no se pudo abrir " + config.transportTrace);
+            }
+            TransportSearchConfig transport;
+            transport.temperature = config.transportTemperature;
+            transport.cycle = config.transportCycle;
+            transport.trace = trace.is_open() ? &trace : nullptr;
+            transport.fixedMachines = config.transportFixedMachines;
+            transport.lns = config.transportLns;
+            transport.destroySize = config.transportDestroy;
+            transport.repairWidth = config.transportRepair;
+            transport.assignment = config.transportAssignment;
+            transport.jobs = config.transportJobs;
+            transport.window = config.transportWindow;
+            transport.requestScan = config.transportRequestScan;
+            transport.fractional = config.transportFractional;
+            outcome = solveTransport(in, std::move(start), remaining, transport);
+            outcome.evals += seedEvals;
+        } else if (!config.fromTxt.empty()) {
             Candidate start = loadTxtCandidate(in, config.fromTxt);
             std::mt19937_64 rng(config.seed);
             SearchResult search = searchFromStart(in, start, options, rng);
@@ -711,8 +810,9 @@ int main(int argc, char** argv) {
                   << " blocked_time=" << outcome.result.blockedTime
                   << " idle_time=" << outcome.result.machineIdleTime
                   << " empty_travel=" << outcome.result.emptyTravel
-                  << " loaded_travel=" << outcome.result.loadedTravel
-                  << " phase_input_trips=" << outcome.result.phaseInputTrips
+                  << " loaded_travel=" << outcome.result.loadedTravel;
+        if (outcome.strategy != "transport-search") {
+            std::cout << " phase_input_trips=" << outcome.result.phaseInputTrips
                   << " phase_output_trips=" << outcome.result.phaseOutputTrips
                   << " phase_input_lots=" << outcome.result.phaseInputLots
                   << " phase_output_lots=" << outcome.result.phaseOutputLots
@@ -730,8 +830,9 @@ int main(int argc, char** argv) {
                   << " max_free=" << outcome.result.maxSimultaneouslyFree
                   << " candidate_routes=" << outcome.result.candidateRoutes
                   << " dfs_nodes=" << outcome.result.dfsNodes
-                  << " joint_choices=" << outcome.result.jointChoicesUsed
-                  << " makespan=" << outcome.result.makespan
+                  << " joint_choices=" << outcome.result.jointChoicesUsed;
+        }
+        std::cout << " makespan=" << outcome.result.makespan
                   << " learned_choices=" << outcome.result.learnedChoiceCount
                   << " learned_changes=" << outcome.result.learnedChoiceChanges
                   << '\n';

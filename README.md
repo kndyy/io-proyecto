@@ -5,6 +5,13 @@ Solo usa la biblioteca estándar.
 
 Repositorio: https://github.com/kndyy/io-proyecto
 
+**Mejor portafolio local:** los diez candidatos de
+`proposed_submissions/transport_search/` mejoran los TXT aceptados; seis están
+a menos de 1% de la referencia pública proporcionada. Son resultados heurísticos
+validados localmente, sin certificado de optimalidad ni nueva aceptación en
+IO1Lab. El método, las brechas restantes y la reproducción están en
+[`ALGORITMO_TRANSPORT_SEARCH.md`](ALGORITMO_TRANSPORT_SEARCH.md).
+
 ## Compilar y verificar
 
 ```bash
@@ -60,6 +67,7 @@ Para cambiar de solución no hace falta recompilar.
 | `phase-bucket` | ILS + despacho de AGVs guiado por fase y viajes de longitud adaptativa | por defecto, validada |
 | `phase-joint` | BEJ-AGV: enumeración acotada de rutas completas + asignación conjunta de AGVs | experimental, no promovida |
 | `phase-learned` | CEM aprende los pesos de las features de despacho sobre rutas phase-bucket | experimental, no promovida |
+| `transport-search` | grafo de precedencias con rutas AGV completas, capacidad y buffers | mejora directa de rutas y asignaciones; validada localmente |
 
 `phase-bucket` es la estrategia por defecto: superó los diez resultados históricos y los diez TXT fueron aceptados por IO1Lab. `integrated` y `alns-joint` se conservan como comparadores; `alns-joint` es experimental y sus rutas mixtas mostraron bloqueo excesivo. Mantiene el simulador y las reglas físicas, y añade una búsqueda ILS/VND con prioridad adaptativa de AGVs y búsqueda del tamaño de lote.
 
@@ -93,7 +101,31 @@ El binario exporta el formato oficial con `--txt`:
      --txt submissions/instancia_01.txt
 ```
 
-`--from-txt` recupera solo el orden de procesos por máquina de un envío previo y vuelve a simular el despacho de AGVs con el simulador actual.
+En las estrategias históricas, `--from-txt` recupera solo el orden de procesos por máquina y vuelve a simular el despacho. En `transport-search`, conserva también la secuencia completa de pickups y entregas de cada AGV para optimizarla directamente.
+
+### Nuevas soluciones: búsqueda directa del transporte
+
+`transport-search` mejora las diez medias aceptadas entre **2.80% y 24.91%**.
+Los nuevos TXT están en `proposed_submissions/transport_search/`; tienen
+validación local y replay independiente de buffers, pero aún no aceptación
+oficial en IO1Lab. Las instancias 09/10 bajaron a **996.341333 / 976.200167**.
+Cumplen el objetivo de 1% las instancias **01, 02, 03, 05, 08 y 10**. Las brechas
+restantes son **1.391% en 04, 1.462% en 06, 1.163% en 07 y 4.624% en 09**.
+
+```bash
+./io1 --input instances/instancia_10.io1 --strategy transport-search \
+  --from-txt proposed_submissions/instancia_10.txt --max-evals 1000000 \
+  --seed 20261109 --txt experiments/local/transport_10.txt
+python3 tools/validate_transport.py instances/instancia_10.io1 experiments/local/transport_10.txt
+```
+
+Sin `--from-txt`, construye un inicio con `phase-bucket`. Ver
+`ALGORITMO_TRANSPORT_SEARCH.md` para el modelo, las iteraciones, los comandos de
+reproducción y las limitaciones. `results/transport_search.csv` se regenera con
+`python3 tools/report_transport.py` y contiene objetivos y hashes de los TXT.
+`python3 tools/report_transport.py --check` verifica los archivos publicados sin
+reescribir la tabla. Los resultados son los mejores de una campaña con distintos
+inicios y presupuestos; no corresponden a una única ejecución de presupuesto fijo.
 
 Los envíos generados están en `submissions/`:
 
@@ -224,6 +256,8 @@ main.cpp          lectura de argumentos, selector, self-tests y salida
 instance.hpp      lectura y validación del formato .io1
 simulator.hpp     simulación determinista de máquinas, buffers y AGVs
 heuristic.hpp     baselines, construcciones, vecindades y VND
+search_types.hpp  opciones y resultados compartidos entre búsquedas
+transport.hpp     búsqueda directa sobre secuencias AGV y grafo de precedencias
 selector.conf     selector externo en tiempo de ejecución
 tools/            comparación, validación, diagnóstico, bench_joint, learn_dispatch,
                   rollout_first, counterfactual y key_ablation
@@ -345,4 +379,3 @@ python3 tools/bench_joint.py --stage A --output experiments/local
 Los resultados crudos quedan en `experiments/local/` (ignorado por git). Las banderas `--phase-outbound-only` y `--phase-hard-unblock` existen solo para las ablaciones de fallback; no son el valor por defecto.
 
 Referencia: Júlia Bergmann, András Kovács y József Váncza, “AGV scheduling in shopfloor logistics of semiconductor assembly”, *Journal of Manufacturing Systems*, 87 (2026), 27–47, DOI: 10.1016/j.jmsy.2026.05.004. La función de prioridad, las vecindades y el bloqueo son adaptaciones del proyecto, no una reproducción exacta del algoritmo del artículo.
-

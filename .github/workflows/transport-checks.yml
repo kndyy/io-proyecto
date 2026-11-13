@@ -1,0 +1,34 @@
+name: Validate transport portfolio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.cpp'
+      - '**/*.hpp'
+      - 'tools/*.py'
+      - 'proposed_submissions/transport_search/**'
+      - 'results/public_targets.csv'
+      - 'results/transport_search.csv'
+      - '.github/workflows/transport-checks.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build C++20 solver and run existing tests
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic main.cpp -o io1
+          ./io1 --self-test
+      - name: Test direct schedule model and search
+        run: |
+          g++ -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I. tools/test_transport.cpp -o /tmp/test-transport
+          /tmp/test-transport
+      - name: Independently validate published TXT objectives and buffers
+        run: python3 tools/report_transport.py --check
