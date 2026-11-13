@@ -66,22 +66,27 @@ threshold cannot be inferred from them alone.
 
 ## Detailed bottleneck diagnosis
 
-From the accepted TXT files. `starve` is machine idle waiting for input/AGV;
-`tail` is summed machine idle after each machine’s last process.
-`starve + blocked + tail = m·makespan − machine busy`.
+The accepted configurations were re-run with the full debug reports enabled. The
+reported means matched the accepted platform values exactly. Machine idle is
+decomposed as: no AGV assigned (`starved`) + input reserved and in transit +
+output blocking + post-processing tail.
 
-| Inst. | Mean | Makespan | Machine util. | AGV util. | Empty share | Blocked | Starve | Tail |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 01 | 337.4 | 706 | 77.8% | 69.7% | 37.3% | 0 | 68 | 559 |
-| 02 | 438.2 | 806 | 87.8% | 90.9% | 33.2% | 0 | 170 | 321 |
-| 03 | 520.9 | 1031 | 81.7% | 88.9% | 29.8% | 0 | 274 | 860 |
-| 04 | 566.0 | 1112 | 90.2% | 88.6% | 35.2% | 5 | 231 | 528 |
-| 05 | 654.5 | 1404 | 83.9% | 87.0% | 33.2% | 5 | 281 | 1525 |
-| 06 | 881.8 | 1730 | 80.9% | 92.2% | 37.7% | 213 | 1106 | 1320 |
-| 07 | 1073.4 | 2123 | 72.9% | 91.8% | 38.0% | 342 | 2819 | 2019 |
-| 08 | 1294.2 | 2564 | 67.4% | 94.4% | 38.1% | 601 | 4166 | 3598 |
-| 09 | 1273.7 | 2513 | 75.8% | 95.1% | 33.0% | 1009 | 2701 | 2970 |
-| 10 | 1300.1 | 2612 | 74.9% | 94.7% | 33.1% | 244 | 4794 | 2816 |
+| Inst. | Mean | Makespan | Mach. util. | AGV util. | Empty share | Starved | Input in transit | Blocked | Tail |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 01 | 337.4 | 706 | 77.8% | 69.7% | 37.3% | 4 | 64 | 0 | 559 |
+| 02 | 438.2 | 806 | 87.8% | 90.9% | 33.2% | 60 | 110 | 0 | 321 |
+| 03 | 520.9 | 1031 | 81.7% | 88.9% | 29.8% | 118 | 156 | 0 | 860 |
+| 04 | 566.0 | 1112 | 90.2% | 88.6% | 35.2% | 59 | 172 | 5 | 528 |
+| 05 | 654.5 | 1404 | 83.9% | 87.0% | 33.2% | 65 | 216 | 6 | 1525 |
+| 06 | 881.8 | 1730 | 80.9% | 92.2% | 37.7% | 784 | 322 | 213 | 1320 |
+| 07 | 1073.4 | 2123 | 72.9% | 91.8% | 38.0% | 1706 | 1114 | 342 | 2019 |
+| 08 | 1294.2 | 2564 | 67.4% | 94.4% | 38.1% | 2292 | 1874 | 601 | 3598 |
+| 09 | 1273.7 | 2513 | 75.8% | 95.1% | 33.0% | 1932 | 769 | 1009 | 2970 |
+| 10 | 1300.1 | 2612 | 74.9% | 94.7% | 33.1% | 3577 | 1217 | 244 | 2816 |
+
+`tail` is summed machine idle after each machine’s last process. `starved`
+means idle with pending work and no AGV reservation; `input in transit` means
+idle while an input is reserved and being delivered.
 
 ### Where time is lost
 
@@ -91,14 +96,42 @@ From the accepted TXT files. `starve` is machine idle waiting for input/AGV;
 2. Empty travel is the largest controllable overhead: 33–38% of AGV travel.
 3. Output batching is underfilled: 76% on 10, 79% on 09, while input fill is
    91–99%.
-4. Machines starve while AGVs are saturated: 4,794 s on 10, 2,701 s on 09,
-   4,166 s on 08.
-5. Blocking is material but concentrated: 1,009 s on 09 (mostly M1–M4),
-   601 s on 08 (M1/M3), 244 s on 10 (mostly M3).
+4. Ten has 3,577 s of true machine starvation plus 1,217 s waiting for already
+   reserved input. Nine has 1,932 s starvation plus 769 s reserved-input wait;
+   Eight has 2,292 s plus 1,874 s. Transport is both late and unbalanced.
+5. Blocking is concentrated: 1,009 s on 09 (M1–M4), 601 s on 08 (M1/M3), 244 s
+   on 10 (mostly M3). It is not the only issue, but it is material on 09/08.
 6. The average is dragged by the late tail: mean completion is about 50% of
-   makespan on all instances.
+   makespan on all instances. On 09/10 the tail is ~2,970/2,816 s.
 7. Instances 01–05 are a different regime: gaps are 3–11% and AGV utilization is
    lower. Most upside is in 06–10, especially 09/10.
+
+### Per-lot waiting and hotspots
+
+Alpha wait is time in α before processing; beta wait is time in β before
+pickup. Values are p50 / p90 / max seconds.
+
+| Inst. | Alpha wait | Beta wait | Outbound transport |
+|---|---|---|---|
+| 06 | 4.5 / 93 / 141 | 43 / 111 / 221 | 29 / 42 / 67 |
+| 07 | 0 / 65 / 202 | 47 / 114 / 240 | 30 / 45 / 52 |
+| 08 | 0 / 58 / 173 | 54 / 124 / 274 | 29 / 45 / 67 |
+| 09 | 13 / 73 / 202 | 83 / 156 / 221 | 32 / 53 / 75 |
+| 10 | 0 / 80 / 144 | 45 / 96 / 216 | 37 / 59 / 75 |
+
+The dominant lot-level delay is **waiting in β for outbound pickup**, not
+waiting in α. This matches the output-fill and AGV-saturation evidence.
+
+Starved-machine hotspots:
+
+- 10: M12 970 s, M8 524 s, M5 508 s.
+- 09: M8 532 s, M11 295 s, M5 327 s; blocked M2 261 s, M3 264 s, M4 216 s.
+- 08: M8 472 s, M5 413 s, M1 163 s plus blocked M1 243 s and M3 235 s.
+- 07: M8 384 s, M6 311 s, M5 256 s.
+- 06: M8 283 s, M5 224 s; blocked M3 126 s.
+
+All AGVs on 09/10 carry similar load; there is no single lazy or overloaded
+vehicle. Empty travel is spread almost evenly across the fleet.
 
 ### Why local approaches failed
 
@@ -192,4 +225,7 @@ g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I. tools/key_ablation.cpp \
   --mode 0 --samples 120 --strength 0.75
 ```
 
-Raw diagnostics are local under `experiments/local/` and are gitignored.
+The accepted configurations were re-run with `--debug-dir` and reproduced the
+accepted means exactly. Per-lot, per-machine, per-AGV and event-level reports for
+all ten instances are under `experiments/local/observability/` (ignored by git).
+Raw Q0/K1 diagnostics are also local under `experiments/local/`.
